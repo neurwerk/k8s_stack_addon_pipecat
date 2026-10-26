@@ -7,6 +7,8 @@ spec:
   interval: 5m
   timeout: 10m
   dependsOn:
+    - {name: keycloak-pipecat-machines, namespace: auth-keycloak}
+    - {name: pipecat-gateway-registrations, namespace: auth-keycloak-api-key-bridge}
     - {name: pipecat-shared}
     - {name: keycloak-pipecat-oidc, namespace: auth-keycloak}
     - {name: agentgateway, namespace: infra-agentgateway}

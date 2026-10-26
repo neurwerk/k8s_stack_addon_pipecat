@@ -16,12 +16,13 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.connection import IceServer
 from pydantic import BaseModel, ConfigDict, Field
 
 from neurwerk_pipecat.auth import Auth, WebSession
 from neurwerk_pipecat.bundle import load_script
 from neurwerk_pipecat.config import Settings, browser_ice, load_settings, server_ice
+from neurwerk_pipecat.webrtc import BrowserWebRTCConnection as SmallWebRTCConnection
 
 
 class Offer(BaseModel):
@@ -194,6 +195,8 @@ def create_app(settings: Settings) -> FastAPI:
             "title": settings.title,
             "anonymous": settings.anonymous,
             "authenticated": session is not None,
+            "signedIn": session.signed_in if session else False,
+            "loginAvailable": settings.oidc is not None,
             "sessionsEnabled": settings.sessions_enabled,
             "unavailableReason": ""
             if settings.sessions_enabled
@@ -203,7 +206,7 @@ def create_app(settings: Settings) -> FastAPI:
             result.update(
                 {
                     "csrf": session.csrf,
-                    "iceServers": browser_ice(settings),
+                    "iceServers": browser_ice(settings) if settings.sessions_enabled else [],
                     "expires": session.expires,
                 }
             )
@@ -236,6 +239,13 @@ def create_app(settings: Settings) -> FastAPI:
         if not peer or peer.owner != session.id or peer.expires <= time.time():
             raise HTTPException(404, "Connection not found")
         return peer
+
+    def gateway_credential(session: WebSession) -> str:
+        # Optional public-bot login changes identity, never the configured billing mode.
+        if settings.anonymous:
+            assert settings.anonymous_key
+            return settings.anonymous_key.read()
+        return session.token
 
     @app.post(base + "/api/offer")
     async def offer(body: Offer, request: Request):
@@ -276,7 +286,7 @@ def create_app(settings: Settings) -> FastAPI:
                     try:
                         async with asyncio.timeout(max(0, session.expires - time.time())):
                             await app.state.run_bot(
-                                connection, settings, http, session.token, notice
+                                connection, settings, http, gateway_credential(session), notice
                             )
                     except TimeoutError:
                         pass
@@ -377,7 +387,9 @@ def create_app(settings: Settings) -> FastAPI:
 
         try:
             async with asyncio.timeout(max(0, session.expires - time.time())):
-                await app.state.run_bot(websocket, settings, http, session.token, notice)
+                await app.state.run_bot(
+                    websocket, settings, http, gateway_credential(session), notice
+                )
         except (TimeoutError, RuntimeError, WebSocketDisconnect):
             pass
         except Exception:

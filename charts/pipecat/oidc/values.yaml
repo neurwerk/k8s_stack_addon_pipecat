@@ -1,3 +1,9 @@
+machineIdentitiesOnly: false
+authKeycloak:
+  realm: ""
+  adminUser: ""
+  agentgatewayClientId: agentgateway
+  agentgatewayClientRoles: []
 pipecat:
   enabled: false
   hostname: ""
@@ -5,3 +11,8 @@ pipecat:
     clientId: pipecat
     gatewayPermissions: []
   bots: []
+  machineIdentity:
+    # Remains unavailable until a reviewed Tooling image implements scoped machine reconciliation.
+    image: ""
+  # Trusted client approval, supplied after product values, keyed by bot ID.
+  machineIdentityApprovals: {}

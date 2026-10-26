@@ -42,7 +42,7 @@ class OIDC(BaseModel):
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    bot_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,39}$")
+    bot_id: str = Field(pattern=r"^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$")
     url_slug: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     sessions_enabled: bool = False
     title: str = Field(default="Voice assistant", max_length=100)
@@ -70,6 +70,8 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def validate_boundaries(self) -> "Settings":
+        if self.bot_id in {"turn", "product-values"}:
+            raise ValueError("Bot ID is reserved for managed infrastructure")
         if self.sessions_enabled and not all(
             (self.gateway_origin, self.binding_id, self.model_id, self.stt, self.tts)
         ):
@@ -87,8 +89,8 @@ class Settings(BaseModel):
             if url.scheme not in ("https", "http") or not url.hostname or url.username:
                 raise ValueError("Invalid speech API URL")
         if self.anonymous:
-            if (self.sessions_enabled and not self.anonymous_key) or self.oidc:
-                raise ValueError("Anonymous bots require their own key and cannot enable OIDC")
+            if self.sessions_enabled and not self.anonymous_key:
+                raise ValueError("Anonymous bots require their own key")
         elif not self.oidc or self.anonymous_key:
             raise ValueError("Protected bots require OIDC and forbid anonymous credentials")
         if self.oidc:

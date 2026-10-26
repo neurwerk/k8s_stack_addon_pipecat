@@ -2,13 +2,22 @@
   "$schema": "http://json-schema.org/draft-07/schema#", "type": "object",
   "properties": {
     "managedKeysOnly": {"type": "boolean"},
+    "identityOnly": {"type": "boolean"},
     "pipecat": {
       "type": "object",
       "properties": {
         "enabled": {"type": "boolean"},
+        "oidc": {"type": "object", "properties": {
+          "enabled": {"type": "boolean"}, "clientId": {"type": "string"},
+          "secretName": {"type": "string"}, "secretKey": {"type": "string"}
+        }},
+        "secretSync": {"type": "object", "additionalProperties": false, "properties": {
+          "enabled": {"type": "boolean"},
+          "stores": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+        }},
         "bots": {"type": "array", "items": {"type": "object", "required": ["id", "anonymous"],
           "properties": {
-            "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+            "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
             "anonymous": {"type": "boolean"}, "sessionsEnabled": {"type": "boolean"},
             "modelId": {"type": "string", "minLength": 1},
             "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][A-Za-z0-9:._/-]{0,255}$"}}

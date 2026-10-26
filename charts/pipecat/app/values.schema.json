@@ -23,6 +23,7 @@
         "oidc": {
           "type": "object",
           "properties": {
+            "enabled": {"type": "boolean"},
             "issuer": {"type": "string"},
             "clientId": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
             "secretName": {"type": "string", "minLength": 1},
@@ -62,7 +63,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "anonymous"],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+        "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
         "urlSlug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
         "sessionsEnabled": {"type": "boolean"},
         "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

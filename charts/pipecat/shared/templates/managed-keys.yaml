@@ -1,6 +1,6 @@
 {{- if and .Values.pipecat.enabled .Values.managedKeysOnly }}
 {{- range .Values.pipecat.bots }}
-{{- if and (.anonymous | default false) (.sessionsEnabled | default false) (not (empty .gatewayPermissions)) }}
+{{- if eq (include "pipecat.managedBot" (dict "product" $.Values.pipecat "bot" .)) "true" }}
 {{- $name := printf "pipecat-bot-%s" .id }}
 {{- if not (and (has "llm:invoke" .gatewayPermissions) (has (printf "model:%s:invoke" .modelId) .gatewayPermissions)) }}{{ fail "Anonymous managed keys require llm and canonical model invocation grants" }}{{ end }}
 ---

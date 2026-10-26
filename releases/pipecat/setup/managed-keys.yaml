@@ -5,6 +5,7 @@ metadata:
   namespace: auth-keycloak-api-key-bridge
 spec:
   interval: 5m
+  dependsOn: [{name: keycloak-pipecat-machines, namespace: auth-keycloak}]
   chart:
     spec:
       chart: ./charts/pipecat/shared

@@ -1,4 +1,5 @@
 managedKeysOnly: false
+identityOnly: false
 pipecat:
   enabled: false
   image: ""
@@ -21,6 +22,12 @@ pipecat:
       limits: {cpu: "1", memory: 512Mi}
   # Existing Secrets work without OpenBao configuration. Explicit deliveries only.
   secretDeliveries: []
+  secretSync:
+    enabled: false
+    stores:
+      pipecat: pipecat-openbao-secret-store
+      auth-keycloak: auth-keycloak-openbao-secret-store
+      auth-keycloak-api-key-bridge: auth-keycloak-api-key-bridge-openbao-secret-store
   scriptStorage:
     enabled: false
     store: ""

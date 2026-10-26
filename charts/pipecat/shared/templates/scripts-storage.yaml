@@ -1,4 +1,4 @@
-{{- if and .Values.pipecat.enabled .Values.pipecat.scriptStorage.enabled (not .Values.managedKeysOnly) }}
+{{- if and .Values.pipecat.enabled .Values.pipecat.scriptStorage.enabled (not .Values.managedKeysOnly) (not .Values.identityOnly) }}
 {{- $s := .Values.pipecat.scriptStorage }}
 {{- range $user := list (dict "name" "pipecat-script-publisher" "mask" (list "read" "write" "delete")) (dict "name" "pipecat-script-reader" "mask" (list "read")) }}
 ---

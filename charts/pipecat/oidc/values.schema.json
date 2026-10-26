@@ -1,14 +1,27 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#", "type": "object",
   "properties": {
+    "machineIdentitiesOnly": {"type": "boolean"},
     "pipecat": {
       "type": "object",
       "properties": {
         "enabled": {"type": "boolean"},
         "hostname": {"type": "string"},
+        "machineIdentity": {"type": "object", "additionalProperties": false, "properties": {
+          "image": {"type": "string", "pattern": "^$|^[^ ]+:[^ @]+@sha256:[a-f0-9]{64}$"}
+        }},
+        "machineIdentityApprovals": {"type": "object", "patternProperties": {
+          "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$": {"type": "object", "additionalProperties": false,
+            "required": ["clientId", "realmRoles", "gatewayPermissions", "audiences"], "properties": {
+              "clientId": {"type": "string"}, "realmRoles": {"const": []},
+              "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+              "audiences": {"const": ["agentgateway"]}
+            }}
+        }, "additionalProperties": false},
         "bots": {"type": "array", "items": {"type": "object", "required": ["id", "anonymous"],
-          "properties": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"}, "urlSlug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "anonymous": {"type": "boolean"}}}},
+          "properties": {"id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}}, "urlSlug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "anonymous": {"type": "boolean"}, "sessionsEnabled": {"type": "boolean"}, "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}}}},
         "oidc": {"type": "object", "properties": {
+          "enabled": {"type": "boolean"},
           "clientId": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
           "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
         }}

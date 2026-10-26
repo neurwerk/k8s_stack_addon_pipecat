@@ -14,7 +14,7 @@ addon-check:
 lint:
 	uv run --frozen ruff check src tests
 	uv run --frozen ruff format --check src tests
-	@for chart in $(CHARTS); do helm lint --strict "$$chart"; helm lint --strict "$$chart" -f validation/values.yaml; done
+	@for chart in $(CHARTS); do helm lint --strict "$$chart"; helm lint --strict "$$chart" --namespace pipecat -f validation/values.yaml; done
 
 schema:
 	@for chart in $(CHARTS); do helm template pipecat "$$chart" --namespace pipecat -f validation/values.yaml | kubeconform -strict -summary -ignore-missing-schemas; done

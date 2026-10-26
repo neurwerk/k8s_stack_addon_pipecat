@@ -294,6 +294,48 @@ class FakeConnection:
 
 
 class SessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_optional_public_login_keeps_explicit_bot_credential_mode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            key = Path(temporary) / "credential"
+            key.write_text("synthetic-scoped-bot-key")
+            data = settings(key).model_dump()
+            data["oidc"] = settings(key, protected=True).model_dump()["oidc"]
+            config = Settings.model_validate(data)
+            app = create_app(config)
+            received = []
+            started = asyncio.Event()
+
+            async def bot(connection, settings, http, credential, notice):
+                received.append(credential)
+                started.set()
+                await asyncio.Event().wait()
+
+            with (
+                patch("neurwerk_pipecat.server.Auth.initialize", new=AsyncMock()),
+                patch("neurwerk_pipecat.server.SmallWebRTCConnection", FakeConnection),
+            ):
+                async with app.router.lifespan_context(app):
+                    app.state.run_bot = bot
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app), base_url=config.public_origin
+                    ) as client:
+                        result = (await client.get("/example/api/config")).json()
+                        self.assertTrue(result["loginAvailable"])
+                        self.assertFalse(result["signedIn"])
+                        session = next(iter(app.state.auth.sessions.values()))
+                        session.token = "synthetic-delegated-user-token"
+                        session.signed_in = True
+                        client.headers.update(
+                            {"x-csrf-token": result["csrf"], "origin": config.public_origin}
+                        )
+                        response = await client.post(
+                            "/example/api/offer", json={"sdp": "synthetic", "type": "offer"}
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        await asyncio.wait_for(started.wait(), 1)
+                        self.assertEqual(received, ["synthetic-scoped-bot-key"])
+                        await client.post("/example/api/cancel")
+
     async def test_ownership_atomic_admission_cancel_and_disabled_sessions(self):
         with tempfile.TemporaryDirectory() as temporary:
             key = Path(temporary) / "credential"
@@ -376,12 +418,15 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 }
             ]
+            deltas.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
             payload = "".join("data: " + json.dumps(delta) + "\n\n" for delta in deltas)
             payload += "data: [DONE]\n\n"
 
             def respond(request):
                 captured.append(request)
-                return httpx.Response(200, content=payload)
+                return httpx.Response(
+                    200, content=payload, headers={"content-type": "text/event-stream"}
+                )
 
             async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
                 notices = []
@@ -431,7 +476,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         class Stream(httpx.AsyncByteStream):
             async def __aiter__(self):
                 started.set()
-                yield b'data: {"choices":[]}\n\n'
+                yield b'data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}\n\n'
                 await asyncio.Event().wait()
 
             async def aclose(self):
@@ -441,7 +486,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             key = Path(temporary) / "key"
             key.write_text("synthetic")
             async with httpx.AsyncClient(
-                transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Stream()))
+                transport=httpx.MockTransport(
+                    lambda _: httpx.Response(
+                        200, stream=Stream(), headers={"content-type": "text/event-stream"}
+                    )
+                )
             ) as http:
                 llm = GatewayLLM(settings(key), http, "delegated", lambda _: None)
                 llm.push_frame = AsyncMock()

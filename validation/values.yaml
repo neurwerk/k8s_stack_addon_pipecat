@@ -3,6 +3,8 @@ pipecat:
   enabled: true
   hostname: voice.example.com
   image: neurwerk-pipecat:local
+  secretSync:
+    enabled: true
   turn:
     enabled: true
     hostname: turn.example.com
@@ -21,7 +23,6 @@ pipecat:
     - id: public-example
       sessionsEnabled: true
       anonymous: true
-      gatewaySecretRef: {name: pipecat-public-example-gateway, key: apiKey}
       gatewayPermissions: ["llm:invoke", "model:example-model:invoke"]
       bindingId: voice
       modelId: example-model

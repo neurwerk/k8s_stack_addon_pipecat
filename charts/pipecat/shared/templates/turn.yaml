@@ -1,4 +1,4 @@
-{{- if and .Values.pipecat.enabled .Values.pipecat.turn.enabled (not .Values.managedKeysOnly) }}
+{{- if and .Values.pipecat.enabled .Values.pipecat.turn.enabled (not .Values.managedKeysOnly) (not .Values.identityOnly) }}
 {{- $t := .Values.pipecat.turn }}
 {{- $host := required "turn.hostname is required" $t.hostname }}
 {{- if or (gt (int $t.relayMinPort) (int $t.relayMaxPort)) (gt (sub (int $t.relayMaxPort) (int $t.relayMinPort)) 63) }}{{ fail "TURN relay range must contain 1-64 ports" }}{{ end }}

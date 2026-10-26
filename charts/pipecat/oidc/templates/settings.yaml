@@ -1,10 +1,15 @@
-{{- if .Values.pipecat.enabled }}
+{{- if and .Values.pipecat.enabled (not .Values.machineIdentitiesOnly) }}
 {{- $p := .Values.pipecat }}
 {{- $host := required "pipecat.hostname is required" $p.hostname }}
 {{- if not (regexMatch `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$` $host) }}{{ fail "Expected an exact public hostname" }}{{ end }}
 {{- $callbacks := list }}
+{{- $protected := false }}
+{{- range $p.bots }}{{- if not .anonymous }}{{- $protected = true }}{{- end }}{{- end }}
+{{- $enabled := $protected }}
+{{- if hasKey $p.oidc "enabled" }}{{- $enabled = $p.oidc.enabled }}{{- end }}
+{{- if and $protected (not $enabled) }}{{ fail "Protected bots require OIDC" }}{{ end }}
 {{- range $p.bots }}
-{{- if not (.anonymous | default false) }}
+{{- if $enabled }}
 {{- $callbacks = append $callbacks (printf "https://%s/%s/auth/callback" $host (.urlSlug | default .id)) }}
 {{- end }}
 {{- end }}

@@ -1,8 +1,14 @@
 {{- if .Values.pipecat.enabled }}
 {{- $p := .Values.pipecat }}
+{{- $protected := false }}
+{{- range $p.bots }}{{- if not .anonymous }}{{- $protected = true }}{{- end }}{{- end }}
+{{- $oidcEnabled := $protected }}
+{{- if hasKey $p.oidc "enabled" }}{{- $oidcEnabled = $p.oidc.enabled }}{{- end }}
+{{- if and $protected (not $oidcEnabled) }}{{ fail "Protected bots require OIDC" }}{{ end }}
 {{- $ids := dict }}
 {{- $slugs := dict }}
 {{- range $bot := $p.bots }}
+{{- if has $bot.id (list "turn" "product-values") }}{{ fail "Bot ID is reserved for managed infrastructure" }}{{ end }}
 {{- $slug := $bot.urlSlug | default $bot.id }}
 {{- if or (hasKey $slugs $slug) (has $slug (list "healthz" "assets")) }}{{ fail "Bot URL slugs must be unique and cannot use reserved paths" }}{{ end }}
 {{- $_ := set $slugs $slug true }}
@@ -12,6 +18,8 @@
 {{- $image := required "Publish and verify the runtime image before configuring bots" $p.image }}
 {{- $hostname := required "pipecat.hostname is required" $p.hostname }}
 {{- $anonymous := $bot.anonymous | default false }}
+{{- $gatewayRef := $bot.gatewaySecretRef | default dict }}
+{{- if and (not (empty $gatewayRef)) (hasPrefix "pipecat-bot-" $gatewayRef.name) (or (ne $gatewayRef.name (printf "pipecat-bot-%s" $bot.id)) (ne $gatewayRef.key "gatewayApiKey")) }}{{ fail "Managed gateway Secret references must match their bot and gatewayApiKey field" }}{{ end }}
 {{- $credentials := dict }}
 {{- $sessions := $bot.sessionsEnabled | default false }}
 {{- $config := dict "bot_id" $bot.id "url_slug" $slug "sessions_enabled" $sessions "title" ($bot.title | default "Voice assistant") "public_origin" (printf "https://%s" $hostname) "anonymous" $anonymous "gateway_origin" $p.gatewayOrigin "binding_id" ($bot.bindingId | default "") "model_id" ($bot.modelId | default "") }}
@@ -22,11 +30,14 @@
 {{- end }}
 {{- if $anonymous }}
 {{- if $sessions }}
+{{- if and (empty $bot.gatewayPermissions) (not $bot.gatewaySecretRef) }}{{ fail "Enabled anonymous bots require managed gatewayPermissions or an explicit existing gatewaySecretRef" }}{{ end }}
 {{- $_ := set $credentials "gateway" ($bot.gatewaySecretRef | default (dict "name" (printf "pipecat-bot-%s" $bot.id) "key" "gatewayApiKey")) }}
 {{- $_ := set $config "anonymous_key" (dict "file" "/credentials/gateway/value") }}
 {{- end }}
 {{- else }}
 {{- if $bot.gatewaySecretRef }}{{ fail "Protected bots forbid gatewaySecretRef" }}{{ end }}
+{{- end }}
+{{- if $oidcEnabled }}
 {{- $_ := set $credentials "oidc" (dict "name" $p.oidc.secretName "key" $p.oidc.secretKey) }}
 {{- $_ := set $config "oidc" (dict "issuer" (required "OIDC issuer is required" $p.oidc.issuer) "client_id" $p.oidc.clientId "client_secret" (dict "file" "/credentials/oidc/value")) }}
 {{- end }}
@@ -37,6 +48,7 @@
 {{- if $speech.voice }}{{ $_ := set $service "voice" $speech.voice }}{{ end }}
 {{- if $speech.language }}{{ $_ := set $service "language" $speech.language }}{{ end }}
 {{- if $speech.secretRef }}
+{{- if and (hasPrefix "pipecat-bot-" $speech.secretRef.name) (or (ne $speech.secretRef.name (printf "pipecat-bot-%s" $bot.id)) (ne $speech.secretRef.key (printf "%sApiKey" $kind))) }}{{ fail "Managed speech Secret references must match their bot and speech field" }}{{ end }}
 {{- $_ := set $credentials $kind $speech.secretRef }}
 {{- $_ := set $service "key" (dict "file" (printf "/credentials/%s/value" $kind)) }}
 {{- end }}

@@ -23,6 +23,7 @@ class WebSession:
     expires: float
     token: str
     subject: str
+    signed_in: bool = False
 
 
 @dataclass
@@ -71,12 +72,14 @@ class Auth:
         self.sessions = {key: value for key, value in self.sessions.items() if value.expires > now}
         self.logins = {key: value for key, value in self.logins.items() if value.expires > now}
 
-    def create(self, token: str, subject: str, expires: float) -> WebSession:
+    def create(
+        self, token: str, subject: str, expires: float, *, signed_in: bool = False
+    ) -> WebSession:
         self.prune()
         if len(self.sessions) >= self.settings.max_web_sessions:
             raise HTTPException(429, "Session limit reached")
         session = WebSession(
-            secrets.token_urlsafe(32), secrets.token_urlsafe(32), expires, token, subject
+            secrets.token_urlsafe(32), secrets.token_urlsafe(32), expires, token, subject, signed_in
         )
         self.sessions[session.id] = session
         return session
@@ -198,7 +201,7 @@ class Auth:
             if oidc.admission_role not in roles:
                 raise ValueError("Application admission denied")
             expiry = min(float(access["exp"]), time.time() + self.settings.session_seconds)
-            session = self.create(tokens["access_token"], access["sub"], expiry)
+            session = self.create(tokens["access_token"], access["sub"], expiry, signed_in=True)
         except (httpx.HTTPError, jwt.PyJWTError, ValueError, KeyError, TypeError):
             raise HTTPException(403, "Login validation failed") from None
         old = request.cookies.get(self.cookie, "")
