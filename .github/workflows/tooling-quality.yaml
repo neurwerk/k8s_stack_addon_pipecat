@@ -1,0 +1,39 @@
+name: Add-on Tooling Quality
+on:
+  workflow_call:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tooling
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: tooling/uv.lock
+      - run: uv python install 3.12
+      - run: uv lock --check
+      - run: uv sync --frozen --dev
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen ty check
+      - run: uv run --frozen pytest
+      - run: uv build --no-sources
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: tooling
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: neurwerk-pipecat-tooling:local
+      - name: Verify independent offline tooling artifact
+        run: docker run --rm --network none neurwerk-pipecat-tooling:local python -c 'from neurwerk_pipecat_tooling import __version__; from neurwerk_pipecat_tooling.selection import select_pipecat; print(__version__)'

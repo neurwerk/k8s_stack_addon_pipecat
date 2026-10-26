@@ -5,8 +5,8 @@ ADDON_TOOLING ?= $(WORKSPACE_ROOT)/tooling
 CHARTS := $(sort $(shell find charts -name Chart.yaml -printf '%h\n'))
 PACKAGES := namespaces/pipecat pipecat/setup pipecat/app
 
-.PHONY: check addon-check lint schema compose static test build image-build
-check: addon-check lint schema compose static test build
+.PHONY: check addon-check lint schema compose static test build image-build tooling-check tooling-image-build
+check: addon-check lint schema compose static test build tooling-check
 
 addon-check:
 	uv run --frozen --project "$(ADDON_TOOLING)" addon-check "$(CURDIR)" --base "$(WORKSPACE_ROOT)/base"
@@ -36,3 +36,14 @@ test:
 
 image-build:
 	docker build --tag neurwerk-pipecat:local .
+
+tooling-check:
+	cd tooling && uv lock --check
+	cd tooling && uv run --frozen ruff check .
+	cd tooling && uv run --frozen ruff format --check .
+	cd tooling && uv run --frozen ty check
+	cd tooling && uv run --frozen pytest
+	cd tooling && uv build --no-sources
+
+tooling-image-build:
+	docker build --tag neurwerk-pipecat-tooling:local tooling

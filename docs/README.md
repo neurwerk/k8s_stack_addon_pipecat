@@ -6,5 +6,6 @@ Self-hosted voice bots and browser UI, with Keycloak admission and delegated Age
 - [Private scripts](scripts.md)
 - [Development and publication](development.md)
 - [Upstream source](source.md)
+- [Add-on tooling ownership](tooling/README.md)
 
 `release/manifest.yaml` is authoritative for availability and prerequisites. Staged packages are not installable releases. A rollout or restart ends in-memory sessions and calls; use a short maintenance window rather than a staged rollout.
