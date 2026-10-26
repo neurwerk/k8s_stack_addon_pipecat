@@ -1,0 +1,38 @@
+name: Check and build (no publication)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: neurwerk/k8s_stack_tooling
+          ref: 47116f0f906a1f8c901f084f8fd117b6e87d7815
+          path: build/tooling
+      - uses: actions/checkout@v4
+        with:
+          repository: neurwerk/k8s_stack_base
+          ref: v0.3.29
+          path: build/base
+      - uses: jdx/mise-action@v2
+      - run: uv sync --frozen
+      - run: npm ci
+        working-directory: frontend
+      - run: make check WORKSPACE_ROOT="$GITHUB_WORKSPACE/build" ADDON_TOOLING="$GITHUB_WORKSPACE/build/tooling"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: neurwerk-pipecat:local
+          platforms: linux/amd64
+      - name: Verify offline bundled models and runtime imports
+        run: |
+          docker run --rm --network none --entrypoint python neurwerk-pipecat:local -c 'from pipecat.audio.vad.silero import SileroVADAnalyzer; from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3; from neurwerk_pipecat.example import run_bot; SileroVADAnalyzer(); LocalSmartTurnAnalyzerV3()'

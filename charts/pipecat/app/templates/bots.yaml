@@ -1,0 +1,204 @@
+{{- if .Values.pipecat.enabled }}
+{{- $p := .Values.pipecat }}
+{{- $ids := dict }}
+{{- $slugs := dict }}
+{{- range $bot := $p.bots }}
+{{- $slug := $bot.urlSlug | default $bot.id }}
+{{- if or (hasKey $slugs $slug) (has $slug (list "healthz" "assets")) }}{{ fail "Bot URL slugs must be unique and cannot use reserved paths" }}{{ end }}
+{{- $_ := set $slugs $slug true }}
+{{- if hasKey $ids $bot.id }}{{ fail "Bot IDs must be unique" }}{{ end }}
+{{- $_ := set $ids $bot.id true }}
+{{- $name := printf "pipecat-%s" $bot.id }}
+{{- $image := required "Publish and verify the runtime image before configuring bots" $p.image }}
+{{- $hostname := required "pipecat.hostname is required" $p.hostname }}
+{{- $anonymous := $bot.anonymous | default false }}
+{{- $credentials := dict }}
+{{- $sessions := $bot.sessionsEnabled | default false }}
+{{- $config := dict "bot_id" $bot.id "url_slug" $slug "sessions_enabled" $sessions "title" ($bot.title | default "Voice assistant") "public_origin" (printf "https://%s" $hostname) "anonymous" $anonymous "gateway_origin" $p.gatewayOrigin "binding_id" ($bot.bindingId | default "") "model_id" ($bot.modelId | default "") }}
+{{- if $p.turn.enabled }}
+{{- $_ := set $credentials "turn" (dict "name" $p.turn.secretName "key" "sharedSecret") }}
+{{- $_ := set $config "turn_secret" (dict "file" "/credentials/turn/value") }}
+{{- $_ := set $config "turn_urls" (list (printf "turn:%s:%v?transport=udp" $p.turn.hostname $p.turn.publicUdpPort) (printf "turns:%s:%v?transport=tcp" $p.turn.hostname $p.turn.publicTlsPort)) }}
+{{- end }}
+{{- if $anonymous }}
+{{- if $sessions }}
+{{- $_ := set $credentials "gateway" ($bot.gatewaySecretRef | default (dict "name" (printf "pipecat-bot-%s" $bot.id) "key" "gatewayApiKey")) }}
+{{- $_ := set $config "anonymous_key" (dict "file" "/credentials/gateway/value") }}
+{{- end }}
+{{- else }}
+{{- if $bot.gatewaySecretRef }}{{ fail "Protected bots forbid gatewaySecretRef" }}{{ end }}
+{{- $_ := set $credentials "oidc" (dict "name" $p.oidc.secretName "key" $p.oidc.secretKey) }}
+{{- $_ := set $config "oidc" (dict "issuer" (required "OIDC issuer is required" $p.oidc.issuer) "client_id" $p.oidc.clientId "client_secret" (dict "file" "/credentials/oidc/value")) }}
+{{- end }}
+{{- range $kind := list "stt" "tts" }}
+{{- $speech := get $bot $kind }}
+{{- if $speech }}
+{{- $service := dict "base_url" $speech.baseUrl "model" $speech.model }}
+{{- if $speech.voice }}{{ $_ := set $service "voice" $speech.voice }}{{ end }}
+{{- if $speech.language }}{{ $_ := set $service "language" $speech.language }}{{ end }}
+{{- if $speech.secretRef }}
+{{- $_ := set $credentials $kind $speech.secretRef }}
+{{- $_ := set $service "key" (dict "file" (printf "/credentials/%s/value" $kind)) }}
+{{- end }}
+{{- $_ := set $config $kind $service }}
+{{- end }}
+{{- end }}
+{{- if $bot.iceSecretRef }}
+{{- $_ := set $credentials "ice" $bot.iceSecretRef }}
+{{- $_ := set $config "server_ice_secret" (dict "file" "/credentials/ice/value") }}
+{{- end }}
+{{- if $bot.browserIceSecretRef }}
+{{- $_ := set $credentials "browser-ice" $bot.browserIceSecretRef }}
+{{- $_ := set $config "browser_ice_secret" (dict "file" "/credentials/browser-ice/value") }}
+{{- end }}
+{{- $_ := set $config "ice_servers" ($bot.iceServers | default list) }}
+{{- $_ := set $config "browser_ice_servers" ($bot.browserIceServers | default list) }}
+{{- $_ := set $config "session_seconds" ($bot.sessionSeconds | default 1800) }}
+{{- $_ := set $config "idle_seconds" ($bot.idleSeconds | default 120) }}
+{{- $_ := set $config "max_connections" ($bot.maxConnections | default 4) }}
+{{- $script := $bot.script | default dict }}
+{{- $_ := set $config "script" (ternary "/scripts/bundle" "bundled" ($script.enabled | default false)) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+data:
+  config.json: {{ $config | toJson | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: &labels
+    app.kubernetes.io/name: pipecat
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: bot
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: *labels
+  template:
+    metadata:
+      labels: *labels
+      annotations:
+        checksum/config: {{ $config | toJson | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      {{- if $script.enabled }}
+      initContainers:
+        - name: load-script
+          image: {{ $image | quote }}
+          command: [pipecat-bundle]
+          securityContext: &security
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources: {{ toYaml $p.resources | nindent 12 }}
+          env:
+            - {name: S3_ENDPOINT, value: {{ required "script.endpoint is required" $script.endpoint | quote }}}
+            - {name: S3_BUCKET, value: {{ required "script.bucket is required" $script.bucket | quote }}}
+            - {name: S3_KEY, value: {{ required "script.key is required" $script.key | quote }}}
+            - {name: BUNDLE_SHA256, value: {{ required "script.sha256 is required" $script.sha256 | quote }}}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: {{ $script.secretName }}, key: AWS_ACCESS_KEY_ID}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ $script.secretName }}, key: AWS_SECRET_ACCESS_KEY}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+            - {name: tmp, mountPath: /tmp}
+      {{- end }}
+      containers:
+        - name: bot
+          image: {{ $image | quote }}
+          imagePullPolicy: IfNotPresent
+          {{- if $script.enabled }}
+          securityContext: *security
+          {{- else }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          {{- end }}
+          resources: {{ toYaml $p.resources | nindent 12 }}
+          env:
+            - {name: PIPECAT_CONFIG, value: /config/config.json}
+            - {name: PIPECAT_SMART_TURN_LOG_DATA, value: "false"}
+            - {name: NUMBA_CACHE_DIR, value: /tmp/numba}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+          ports: [{name: http, containerPort: 7860}]
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 15
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            {{- if $script.enabled }}
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+            {{- end }}
+            {{- range $kind, $ref := $credentials }}
+            - {name: {{ $kind }}, mountPath: /credentials/{{ $kind }}, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 256Mi}}
+        {{- if $script.enabled }}
+        - {name: scripts, emptyDir: {sizeLimit: 64Mi}}
+        {{- end }}
+        {{- range $kind, $ref := $credentials }}
+        - name: {{ $kind }}
+          secret:
+            secretName: {{ $ref.name }}
+            items: [{key: {{ $ref.key }}, path: value}]
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  selector:
+    app.kubernetes.io/name: pipecat
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: bot
+  ports: [{name: http, port: 7860, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  ingressClassName: {{ $p.ingressClassName }}
+  tls: [{hosts: [{{ $hostname | quote }}], secretName: pipecat-tls}]
+  rules:
+    - host: {{ $hostname | quote }}
+      http:
+        paths:
+          - path: /{{ $slug }}
+            pathType: Prefix
+            backend:
+              service: {name: {{ $name }}, port: {name: http}}
+{{- end }}
+{{- end }}

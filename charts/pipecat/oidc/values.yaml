@@ -1,0 +1,7 @@
+pipecat:
+  enabled: false
+  hostname: ""
+  oidc:
+    clientId: pipecat
+    gatewayPermissions: []
+  bots: []

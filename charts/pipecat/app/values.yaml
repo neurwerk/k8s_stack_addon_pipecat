@@ -1,0 +1,27 @@
+pipecat:
+  enabled: false
+  hostname: ""
+  # Unavailable until separately approved publication and digest verification.
+  image: ""
+  gatewayOrigin: ""
+  ingressClassName: traefik
+  clusterIssuer: letsencrypt-production-cluster-issuer
+  oidc:
+    issuer: ""
+    clientId: pipecat
+    secretName: pipecat-oidc-secret
+    secretKey: clientSecret
+    gatewayPermissions: []
+  bots: []
+  turn:
+    enabled: false
+    hostname: ""
+    secretName: pipecat-turn-secret
+    publicUdpPort: 3478
+    publicTlsPort: 443
+  resources:
+    requests: {cpu: 500m, memory: 768Mi}
+    limits: {cpu: "2", memory: 2Gi}
+  # HTTPS/speech/S3/TURN destinations, explicitly selected by the client.
+  # Use ipBlock/namespaceSelector/podSelector peers and port/protocol entries.
+  egress: []

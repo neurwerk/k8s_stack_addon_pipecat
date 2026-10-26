@@ -1,0 +1,43 @@
+apiVersion: addons.neurwerk.com/v1alpha1
+kind: AddonRelease
+metadata:
+  name: pipecat
+spec:
+  version: 0.1.0
+  status: staged
+  sourceName: pipecat-addon
+  configurationKey: pipecat
+  prerequisites:
+    base: 0.3.29
+    tooling: 0.12.0
+    stackSetup: 0.6.6
+    baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
+  inputs:
+    - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: client-values, owner: client}
+    - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: pipecat-product-values, owner: client}
+    - {kind: ConfigMap, namespace: pipecat, name: client-values, owner: client}
+    - {kind: ConfigMap, namespace: pipecat, name: pipecat-product-values, owner: client}
+    - {kind: ConfigMap, namespace: auth-keycloak, name: auth-keycloak-app-defaults, owner: base}
+    - {kind: ConfigMap, namespace: auth-keycloak, name: client-values, owner: client}
+    - {kind: ConfigMap, namespace: auth-keycloak, name: keycloak-product-values, owner: client}
+    - {kind: ConfigMap, namespace: auth-keycloak, name: pipecat-product-values, owner: client}
+    - {kind: ConfigMap, namespace: auth-keycloak, name: pipecat-oidc-approval-values, owner: client}
+    - {kind: ConfigMap, namespace: infra-cert-manager, name: client-values, owner: client}
+  packages:
+    - name: namespaces
+      path: releases/namespaces/pipecat
+    - name: setup
+      path: releases/pipecat/setup
+      dependsOn: [namespaces]
+      helmOutputs:
+        - kind: ConfigMap
+          namespace: auth-keycloak
+          name: pipecat-oidc-settings
+          helmRelease: pipecat-oidc-settings
+    - name: app
+      path: releases/pipecat/app
+      dependsOn: [setup]
+  retention:
+    databases: retain
+    volumes: retain
+    credentials: retain

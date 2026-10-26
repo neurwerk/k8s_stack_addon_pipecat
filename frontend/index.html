@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Voice assistant</title></head>
+  <body>
+    <main>
+      <h1 id="title">Voice assistant</h1>
+      <p>Audio is sent to the configured speech services. Model requests use the platform gateway and its personal-data protection.</p>
+      <p id="status" role="status">Loading…</p>
+      <a id="login" hidden>Sign in</a>
+      <section aria-label="Call controls">
+        <button id="connect" disabled>Start conversation</button>
+        <button id="disconnect" disabled>End conversation</button>
+        <button id="mute" disabled>Mute microphone</button>
+        <button id="logout" hidden>Sign out</button>
+      </section>
+      <audio id="audio" autoplay controls aria-label="Assistant audio"></audio>
+      <section aria-label="Personal-data notices"><h2>Personal-data notices</h2><p>Reports appear here, not in spoken responses.</p><div id="notices" aria-live="polite"></div></section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
