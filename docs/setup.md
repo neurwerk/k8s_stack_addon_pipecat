@@ -38,7 +38,7 @@ The browser client is `pipecat`; callbacks are exact `https://<hostname>/<urlSlu
 
 Machines are distinct `pipecat-bot-<id>` clients: service accounts on, browser/password flows and full scope off, exact role assignments/scopes with stale roles revoked and readback verification. The helper refuses unowned existing identities and unrelated clients. The descriptor HelmRelease waits for machine provisioning, then produces version-2 `service_account` grants in `pipecat-bot-<id>-grant/grant.json`. The client registers each grant/verifier pair through Base's `authKeycloakApiKeyBridge.managedRegistrations`. A descriptor alone does not create an account.
 
-The legacy `upsert-oidc-client` is unsuitable and is not invoked. `pipecat.machineIdentity.image` intentionally has no default: managed provisioning remains unavailable until a reviewed helper image is published and pinned, and manifest prerequisites are updated. Source-only candidate Tooling changes are not publication evidence. Existing SecretRefs and protected UI-only bots without managed selections remain supported.
+The legacy `upsert-oidc-client` is unsuitable and is not invoked. `pipecat.machineIdentity.image` pins the reviewed shared Tooling helper; access and browser-OIDC releases use the same verified shared artifact, with its version declared in the manifest. This is separate from Pipecat's own tooling package/image and does not make its pending generic custody-plan integration available. Source-only candidate changes are not publication evidence. Existing SecretRefs and protected UI-only bots without managed selections remain supported; the add-on remains staged until its own required artifacts and integration are reviewed and published.
 
 ## Media and deployment readiness
 

@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: neurwerk/k8s_stack_tooling
-          ref: 47116f0f906a1f8c901f084f8fd117b6e87d7815
+          ref: 4c66ee24566f151b9726d5faf9819740670387df
           path: build/tooling
       - uses: actions/checkout@v4
         with:

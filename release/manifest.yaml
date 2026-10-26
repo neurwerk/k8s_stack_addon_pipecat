@@ -9,7 +9,7 @@ spec:
   configurationKey: pipecat
   prerequisites:
     base: 0.3.29
-    tooling: 0.12.0
+    tooling: 0.13.8
     stackSetup: 0.6.6
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
   inputs:
