@@ -67,7 +67,7 @@ def test_empty_catalog_has_no_credentials_or_disabled_waits():
     validate_selection(addon, selected, {"enabled": True, "bots": []})
     setup = expand_setup(addon, selected.addons[0])
     assert not setup.records and not setup.input_groups and not setup.readers
-    assert not setup.deliveries and not setup.lifecycle.delivery and not setup.lifecycle.restart
+    assert not setup.deliveries
 
 
 def test_machine_request_does_not_supply_its_own_approval():
@@ -119,8 +119,7 @@ def test_independent_bot_fields_match_actual_eso_without_voice(gateway, stt, tts
                 )
     assert actual == expected
     assert deliveries == {(d.namespace, d.name) for d in setup.deliveries}
-    assert {(t.namespace, t.name) for t in setup.lifecycle.delivery} == deliveries
-    assert not setup.handover and not setup.lifecycle.rotate
+    assert not setup.handover
     # A client cannot turn an external/authless provider into a supplied credential.
     selected.addons[0].instances[0].features["stt"] = not stt
     with pytest.raises(SelectionError):
@@ -146,7 +145,7 @@ def test_maximum_catalog_expands_without_suffixing_shared_stores():
     selected = Selection.model_validate(data)
     setup = expand_setup(addon, selected.addons[0])
     assert len(setup.records) == 98
-    assert len(setup.deliveries) == len(setup.lifecycle.delivery) == 99
+    assert len(setup.deliveries) == 99
     assert len(setup.readers) == 3
     assert all("bot-" not in delivery.secret_store for delivery in setup.deliveries)
     data["addons"][0]["instances"].append({"id": "overflow", "recipe": "bot"})
@@ -159,12 +158,12 @@ def test_real_setup_preserves_raw_keys_and_validates_isolated_verifiers():
         installed = version("openbao-stack-setup")
     except PackageNotFoundError:
         pytest.fail(
-            "Required integration prerequisite missing: install openbao-stack-setup==0.7.0 "
+            "Required integration prerequisite missing: install openbao-stack-setup==0.8.0 "
             "from the declared release source or an explicit reviewed candidate wheel",
             pytrace=False,
         )
-    assert installed == "0.7.0", "Required integration needs openbao-stack-setup==0.7.0"
-    assert version("k8s-stack-tooling") == "0.14.0"
+    assert installed == "0.8.0", "Required integration needs openbao-stack-setup==0.8.0"
+    assert version("k8s-stack-tooling") == "0.15.0"
     from openbao_stack_setup import client as client_module
     from openbao_stack_setup import declarative
 
