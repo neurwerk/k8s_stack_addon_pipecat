@@ -1,6 +1,12 @@
 name: Add-on Tooling Quality
 on:
   workflow_call:
+    inputs:
+      base_ref:
+        description: Exact reviewed Base candidate for prepublication tooling quality only
+        type: string
+        required: false
+        default: ""
   pull_request:
     branches: [main]
   push:
@@ -24,7 +30,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: neurwerk/k8s_stack_base
-          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'v0.4.0' || env.BASE_REF }}
+          ref: ${{ inputs.base_ref || (startsWith(github.ref, 'refs/tags/') && 'v0.4.0' || env.BASE_REF) }}
           path: build/base
       - uses: jdx/mise-action@v2
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
