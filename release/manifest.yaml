@@ -55,7 +55,7 @@ spec:
   artifacts:
     - id: tooling
       role: product
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.0
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.0@sha256:f05fc23ce5f2b52c2b210cee505769f35ae34a8e9845e7d9f870d84fba8e9b1b
     - id: runtime
       role: native
       image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.1.0
