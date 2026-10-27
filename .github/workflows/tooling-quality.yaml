@@ -13,6 +13,9 @@ env:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      # Validation uses uv's supported 3.12 series; the runtime image stays digest-pinned.
+      UV_PYTHON: "3.12"
     defaults:
       run:
         working-directory: tooling
@@ -29,7 +32,8 @@ jobs:
           version: "0.12.7"
           enable-cache: true
           cache-dependency-glob: tooling/uv.lock
-      - run: uv python install 3.12.15
+      - name: Install the supported Python 3.12 validation toolchain
+        run: uv python install 3.12
       - name: Require published integration dependencies and reviewed lock
         run: |
           test -f uv.lock || { echo 'Release prerequisite missing: publish Tooling 0.14.0/setup 0.7.0 sources, then generate and review tooling/uv.lock'; exit 1; }
