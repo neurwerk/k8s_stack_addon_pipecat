@@ -179,7 +179,7 @@ def test_namespace_grants_are_exact_and_no_raw_key_reaches_bridge_or_keycloak() 
     }
 
 
-def test_external_secrets_preserve_active_oidc_turn_refresh_without_credential_mutation() -> None:
+def test_external_secrets_do_not_require_managed_credentials() -> None:
     product = deepcopy(PRODUCT)
     product["secretSync"]["enabled"] = False
     product["oidc"]["secretName"] = "existing-login"
@@ -190,17 +190,6 @@ def test_external_secrets_preserve_active_oidc_turn_refresh_without_credential_m
     validate_selection(load_manifest(ROOT / "release/manifest.yaml"), selected, product)
     expanded = setup(selected)
     assert not expanded.records and not expanded.deliveries and not expanded.readers
-    assert not expanded.lifecycle.delivery
-    assert {target.name for target in expanded.lifecycle.provision} == {
-        "pipecat-oidc-settings",
-        "keycloak-pipecat-access",
-        "keycloak-pipecat-oidc",
-    }
-    assert {target.name for target in expanded.lifecycle.restart} == {
-        "pipecat-voice-bot",
-        "pipecat-protected-bot",
-        "pipecat-turn",
-    }
 
 
 def test_anonymous_bots_can_offer_optional_oidc_login() -> None:

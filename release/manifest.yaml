@@ -9,8 +9,8 @@ spec:
   configurationKey: pipecat
   prerequisites:
     base: 0.4.0
-    tooling: 0.14.0
-    stackSetup: 0.7.0
+    tooling: 0.15.0
+    stackSetup: 0.8.0
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
     baseChartVersions:
       charts/keycloak/addon-access: 0.1.6
@@ -134,20 +134,6 @@ spec:
         records: [turn]
         when: managed-turn
     handover: []
-    lifecycle:
-      # ExternalSecret readiness includes its SecretStore dependency. No unconditional
-      # waits for empty stores or optional certificates/media are needed.
-      delivery:
-        - {kind: ExternalSecret, namespace: pipecat, name: pipecat-oidc-secret, when: managed-oidc}
-        - {kind: ExternalSecret, namespace: auth-keycloak, name: pipecat-oidc-secret, when: managed-oidc}
-        - {kind: ExternalSecret, namespace: pipecat, name: pipecat-turn-secret, when: managed-turn}
-      provision:
-        - {kind: HelmRelease, namespace: auth-keycloak, name: pipecat-oidc-settings, when: oidc}
-        - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-access, when: oidc}
-        - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-oidc, when: oidc}
-      restart:
-        - {kind: Deployment, namespace: pipecat, name: pipecat-turn, when: turn}
-      rotate: []
   instanceRecipes:
     - id: bot
       features: {runtime: false, gateway: false, stt: false, tts: false}
@@ -222,16 +208,3 @@ spec:
             records: [verifier]
             when: gateway
         handover: []
-        lifecycle:
-          delivery:
-            - {kind: ExternalSecret, namespace: pipecat, name: 'pipecat-bot-{instance}', when: runtime}
-            - {kind: ExternalSecret, namespace: auth-keycloak, name: 'pipecat-bot-{instance}-oidc', when: gateway}
-            - {kind: ExternalSecret, namespace: auth-keycloak-api-key-bridge, name: 'pipecat-bot-{instance}-verifier', when: gateway}
-          provision:
-            - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-access, when: gateway}
-            - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-machines, when: gateway}
-            - {kind: HelmRelease, namespace: auth-keycloak-api-key-bridge, name: pipecat-gateway-registrations, when: gateway}
-            - {kind: HelmRelease, namespace: auth-keycloak-api-key-bridge, name: keycloak-api-key-bridge, when: gateway}
-          restart:
-            - {kind: Deployment, namespace: pipecat, name: 'pipecat-{instance}'}
-          rotate: []
