@@ -14,7 +14,7 @@ spec:
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
     baseChartVersions:
       charts/keycloak/addon-access: 0.1.6
-      charts/keycloak/addon-oidc: 0.2.0
+      charts/keycloak/addon-oidc: 0.2.1
   inputs:
     - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: client-values, owner: client}
     - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: pipecat-product-values, owner: client}
