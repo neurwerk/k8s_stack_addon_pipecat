@@ -1,0 +1,6 @@
+pipecat:
+  enabled: false
+  hostname: ""
+  turn:
+    enabled: false
+    hostname: ""

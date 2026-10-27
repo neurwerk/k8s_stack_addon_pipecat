@@ -1,0 +1,44 @@
+# Synthetic selection example; source URL/revision pins belong to the Flux objects.
+apiVersion: addons.neurwerk.com/v1alpha2
+kind: AddonSelection
+baseSourceRef: {kind: GitRepository, namespace: flux-system, name: k8s-stack}
+addons:
+  - id: pipecat
+    sourceRef: {kind: GitRepository, namespace: flux-system, name: pipecat-addon}
+    features: {oidc: true, turn: false, managed-oidc: true, managed-turn: false}
+    instances:
+      - {id: voice-bot, recipe: bot, features: {runtime: true, gateway: true, stt: true, tts: false}}
+      - {id: protected-bot, recipe: bot}
+    approvedReaders:
+      - role: addon-pipecat-runtime
+        namespace: pipecat
+        serviceAccount: pipecat-external-secrets
+        audience: openbao
+        records: [oidc, voice-bot-runtime]
+      - role: auth-keycloak
+        namespace: auth-keycloak
+        serviceAccount: auth-keycloak-external-secrets
+        audience: openbao
+        records: [oidc, voice-bot-machine]
+      - role: auth-keycloak-api-key-bridge
+        namespace: auth-keycloak-api-key-bridge
+        serviceAccount: auth-keycloak-api-key-bridge-external-secrets
+        audience: openbao
+        records: [voice-bot-verifier]
+    approvedIdentities:
+      - id: browser
+        mode: browser
+        clientId: pipecat
+        secret: {record: oidc, field: clientSecret}
+        browser:
+          clientId: pipecat
+          redirectUris:
+            - https://voice.example.com/voice_bot/auth/callback
+            - https://voice.example.com/protected-bot/auth/callback
+          webOrigins: [https://voice.example.com]
+          realmRoles: [pipecat-user]
+          roleClaim: realm_access.roles
+          audiences: [agentgateway]
+          mode: login+gateway
+          userTokenForwarding: true
+          gatewayPermissions: []

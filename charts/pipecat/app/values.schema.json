@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["pipecat"],
+  "properties": {
+    "pipecat": {
+      "type": "object",
+      "required": ["enabled", "bots", "oidc"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "turn": {"type": "object", "properties": {
+          "enabled": {"type": "boolean"},
+          "hostname": {"type": "string", "pattern": "^$|^[a-z0-9-]+(\\.[a-z0-9-]+)+$"},
+          "secretName": {"type": "string", "minLength": 1},
+          "publicUdpPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+          "publicTlsPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+        }},
+        "hostname": {"type": "string", "pattern": "^$|^[a-z0-9-]+(\\.[a-z0-9-]+)+$"},
+        "image": {"type": "string"},
+        "gatewayOrigin": {"type": "string", "pattern": "^$|^https://[^/?#]+/?$"},
+        "ingressClassName": {"type": "string", "minLength": 1},
+        "clusterIssuer": {"type": "string", "minLength": 1},
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "issuer": {"type": "string"},
+            "clientId": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+            "secretName": {"type": "string", "minLength": 1},
+            "secretKey": {"type": "string", "minLength": 1},
+            "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+          }
+        },
+        "bots": {"type": "array", "maxItems": 32, "items": {"$ref": "#/definitions/bot"}},
+        "resources": {"type": "object", "required": ["requests", "limits"]},
+        "egress": {"type": "array", "items": {"type": "object", "required": ["to", "ports"]}}
+      }
+    }
+  },
+  "definitions": {
+    "secret": {
+      "type": "object", "additionalProperties": false, "required": ["name", "key"],
+      "properties": {"name": {"type": "string", "minLength": 1}, "key": {"type": "string", "minLength": 1}}
+    },
+    "speech": {
+      "type": "object", "additionalProperties": false, "required": ["baseUrl", "model"],
+      "properties": {
+        "baseUrl": {"type": "string", "pattern": "^https?://[^?#]+$"},
+        "model": {"type": "string", "minLength": 1, "maxLength": 200},
+        "voice": {"type": "string", "minLength": 1},
+        "language": {"type": "string", "minLength": 1},
+        "secretRef": {"$ref": "#/definitions/secret"}
+      }
+    },
+    "ice": {
+      "type": "array", "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["urls"],
+        "properties": {"urls": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}}
+      }
+    },
+    "bot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "anonymous"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
+        "urlSlug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "sessionsEnabled": {"type": "boolean"},
+        "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "title": {"type": "string", "maxLength": 100},
+        "anonymous": {"type": "boolean"},
+        "bindingId": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"},
+        "modelId": {"type": "string", "minLength": 1, "maxLength": 200},
+        "stt": {"$ref": "#/definitions/speech"},
+        "tts": {"$ref": "#/definitions/speech"},
+        "gatewaySecretRef": {"$ref": "#/definitions/secret"},
+        "iceSecretRef": {"$ref": "#/definitions/secret"},
+        "browserIceSecretRef": {"$ref": "#/definitions/secret"},
+        "iceServers": {"$ref": "#/definitions/ice"},
+        "browserIceServers": {"$ref": "#/definitions/ice"},
+        "sessionSeconds": {"type": "integer", "minimum": 60, "maximum": 14400},
+        "idleSeconds": {"type": "integer", "minimum": 30, "maximum": 600},
+        "maxConnections": {"type": "integer", "minimum": 1, "maximum": 32},
+        "script": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "endpoint": {"type": "string", "pattern": "^https?://[^?#]+$"},
+            "bucket": {"type": "string", "minLength": 1},
+            "key": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "secretName": {"type": "string", "minLength": 1}
+          },
+          "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+          "then": {"required": ["endpoint", "bucket", "key", "sha256", "secretName"]}
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"sessionsEnabled": {"const": true}}, "required": ["sessionsEnabled"]},
+         "then": {"required": ["bindingId", "modelId", "stt", "tts"]}},
+        {"if": {"properties": {"anonymous": {"const": false}}},
+         "then": {"not": {"required": ["gatewaySecretRef"]}}}
+      ]
+    }
+  }
+}

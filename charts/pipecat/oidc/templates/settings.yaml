@@ -1,0 +1,39 @@
+{{- if and .Values.pipecat.enabled (not .Values.machineIdentitiesOnly) }}
+{{- $p := .Values.pipecat }}
+{{- $host := required "pipecat.hostname is required" $p.hostname }}
+{{- if not (regexMatch `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$` $host) }}{{ fail "Expected an exact public hostname" }}{{ end }}
+{{- $callbacks := list }}
+{{- $protected := false }}
+{{- range $p.bots }}{{- if not .anonymous }}{{- $protected = true }}{{- end }}{{- end }}
+{{- $enabled := $protected }}
+{{- if hasKey $p.oidc "enabled" }}{{- $enabled = $p.oidc.enabled }}{{- end }}
+{{- if and $protected (not $enabled) }}{{ fail "Protected bots require OIDC" }}{{ end }}
+{{- range $p.bots }}
+{{- if $enabled }}
+{{- $callbacks = append $callbacks (printf "https://%s/%s/auth/callback" $host (.urlSlug | default .id)) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipecat-oidc-settings
+  namespace: {{ .Release.Namespace }}
+  labels: {reconcile.fluxcd.io/watch: Enabled}
+data:
+  values.yaml: |
+    enabled: {{ not (empty $callbacks) }}
+    clientSecret:
+      name: {{ required "pipecat.oidc.secretName is required" $p.oidc.secretName | quote }}
+      key: {{ required "pipecat.oidc.secretKey is required" $p.oidc.secretKey | quote }}
+    authentication:
+      clientId: {{ $p.oidc.clientId | quote }}
+      redirectUris: {{ $callbacks | toJson }}
+      webOrigins: [{{ printf "https://%s" $host | quote }}]
+      realmRoles: [pipecat-user]
+      roleClaim: realm_access.roles
+      audiences: [agentgateway]
+      refreshTokenRotation: true
+      mode: login+gateway
+      userTokenForwarding: true
+      gatewayPermissions: {{ $p.oidc.gatewayPermissions | toJson }}
+{{- end }}

@@ -1,0 +1,18 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pipecat-gateway-registrations
+  namespace: auth-keycloak-api-key-bridge
+spec:
+  interval: 5m
+  dependsOn: [{name: keycloak-pipecat-machines, namespace: auth-keycloak}]
+  chart:
+    spec:
+      chart: ./charts/pipecat/shared
+      sourceRef: {kind: GitRepository, name: pipecat-addon, namespace: flux-system}
+  valuesFrom:
+    - {kind: ConfigMap, name: client-values}
+    - {kind: ConfigMap, name: pipecat-product-values}
+  values:
+    managedKeysOnly: true
+    registrationOnly: true

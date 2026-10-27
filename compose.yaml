@@ -1,0 +1,20 @@
+services:
+  pipecat:
+    image: neurwerk-pipecat:local
+    build: .
+    ports: ["127.0.0.1:7860:7860"]
+    environment:
+      PIPECAT_CONFIG: /config/config.json
+    volumes:
+      - ${PIPECAT_LOCAL_CONFIG:-./local/config.json}:/config/config.json:ro
+      - ${PIPECAT_LOCAL_CREDENTIALS:-./local/credentials}:/credentials:ro
+    read_only: true
+    tmpfs: [/tmp:size=268435456,uid=1000,gid=1000]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

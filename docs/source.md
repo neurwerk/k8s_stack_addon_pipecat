@@ -1,0 +1,5 @@
+# Upstream source
+
+The bundled `src/neurwerk_pipecat/example.py` adapts [Pipecat simple-chatbot/server/bot-openai.py](https://github.com/pipecat-ai/pipecat-examples/blob/6ede04385ac2cf1d3a4cd0863a5dd33969ceccae/simple-chatbot/server/bot-openai.py), reviewed at commit `6ede04385ac2cf1d3a4cd0863a5dd33969ceccae`. The BSD 2-Clause copyright and license are retained in the source and `LICENSES/pipecat-examples.txt` and included in the image.
+
+The original pipeline, independent context aggregators, Silero VAD, brief spoken prompt, client-ready greeting and disconnect cancellation are retained. Daily/cloud credentials, provider-specific speech services and robot video assets are removed; SmallWebRTC, local SmartTurn, client-configured HTTP speech services, a strict delegated AgentGateway adapter and server-side authentication replace them. The UI is original TypeScript using compatible pinned Pipecat SDKs, not a copy of the upstream cloud client. The exact Python and JavaScript versions and dependency resolutions are recorded in the lockfiles.

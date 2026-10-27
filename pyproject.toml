@@ -1,0 +1,39 @@
+[project]
+name = "neurwerk-pipecat"
+version = "0.1.0"
+description = "Self-hosted voice bots with delegated AgentGateway access"
+requires-python = ">=3.12,<3.13"
+license = "BSD-2-Clause"
+dependencies = [
+  "pipecat-ai[webrtc,silero]==1.14.0",
+  "fastapi>=0.135,<1",
+  "uvicorn>=0.42,<1",
+  "httpx>=0.28,<1",
+  "PyJWT[crypto]>=2.12,<3",
+  "boto3>=1.42,<2",
+]
+
+[project.scripts]
+neurwerk-pipecat = "neurwerk_pipecat.server:main"
+pipecat-bundle = "neurwerk_pipecat.bundle:main"
+pipecat-turn-config = "neurwerk_pipecat.turn:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["ruff>=0.15,<1", "mypy>=1.19,<2", "types-boto3[s3]>=1.42,<2", "PyYAML>=6.0,<7"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+ignore_missing_imports = true
+files = ["src/neurwerk_pipecat"]

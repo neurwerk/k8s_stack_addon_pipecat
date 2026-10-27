@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+frontend/node_modules/
+frontend/dist/
+.env
+local/
+credential-plan.json
+*.credential-plan.json
+build/

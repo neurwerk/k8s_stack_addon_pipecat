@@ -1,0 +1,5 @@
+helm 4.2.4
+kustomize 5.8.1
+kubeconform 0.8.0
+uv 0.12.7
+node 24.20.0

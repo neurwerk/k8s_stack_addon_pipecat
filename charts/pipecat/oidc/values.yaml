@@ -1,0 +1,20 @@
+machineIdentitiesOnly: false
+authKeycloak:
+  realm: ""
+  adminUser: ""
+  agentgatewayClientId: agentgateway
+  agentgatewayClientRoles: []
+pipecat:
+  enabled: false
+  hostname: ""
+  oidc:
+    clientId: pipecat
+    secretName: pipecat-oidc-secret
+    secretKey: clientSecret
+    gatewayPermissions: []
+  bots: []
+  machineIdentity:
+    # Shared generic service-client helper; not the separate Pipecat tooling artifact.
+    image: ghcr.io/neurwerk/k8s-stack-tooling:0.14.0@sha256:a1db80f00e8579478382ecc34717af484cf75239008ae8dbe66b01632aa49305
+  # Trusted client approval, supplied after product values, keyed by bot ID.
+  machineIdentityApprovals: {}

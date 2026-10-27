@@ -1,0 +1,17 @@
+{{- if and .Values.pipecat.enabled .Values.managedKeysOnly .Values.registrationOnly }}
+{{- range .Values.pipecat.bots }}
+{{- if eq (include "pipecat.managedBot" (dict "product" $.Values.pipecat "bot" .)) "true" }}
+{{- $name := printf "pipecat-bot-%s" .id }}
+{{- if not (and (has "llm:invoke" .gatewayPermissions) (has (printf "model:%s:invoke" .modelId) .gatewayPermissions)) }}{{ fail "Anonymous managed keys require llm and canonical model invocation grants" }}{{ end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-grant
+  namespace: {{ $.Release.Namespace }}
+  labels: {reconcile.fluxcd.io/watch: Enabled}
+data:
+  grant.json: {{ dict "version" 2 "id" $name "name" $name "principal" (dict "kind" "service_account" "client_id" $name) "permissions" .gatewayPermissions | toJson | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

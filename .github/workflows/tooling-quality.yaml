@@ -1,0 +1,61 @@
+name: Add-on Tooling Quality
+on:
+  workflow_call:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+env:
+  # Reviewed candidate for source CI only; tag-driven publication requires stable Base.
+  BASE_REF: e5eca150c0f71d3f80b135c67f2451758a8f3db1
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      # Validation uses uv's supported 3.12 series; the runtime image stays digest-pinned.
+      UV_PYTHON: "3.12"
+    defaults:
+      run:
+        working-directory: tooling
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: neurwerk/k8s_stack_base
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'v0.4.0' || env.BASE_REF }}
+          path: build/base
+      - uses: jdx/mise-action@v2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.7"
+          enable-cache: true
+          cache-dependency-glob: tooling/uv.lock
+      - name: Install the supported Python 3.12 validation toolchain
+        run: uv python install 3.12
+      - name: Require published integration dependencies and reviewed lock
+        run: |
+          test -f uv.lock || { echo 'Release prerequisite missing: publish Tooling 0.14.0/setup 0.7.0 sources, then generate and review tooling/uv.lock'; exit 1; }
+          uv lock --check
+      - name: Install exact shared Tooling and setup development dependencies
+        run: uv sync --locked --dev
+      - run: uv run --locked ruff check .
+      - run: uv run --locked ruff format --check .
+      - run: uv run --locked ty check
+      - name: Required setup and Base integration
+        run: make tooling-integration ADDON_BASE="$ADDON_BASE"
+        working-directory: .
+        env:
+          ADDON_BASE: ${{ github.workspace }}/build/base
+      - run: uv build --no-sources
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: tooling
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: neurwerk-pipecat-tooling:local
+      - name: Verify independent offline tooling artifact
+        run: docker run --rm --network none --read-only neurwerk-pipecat-tooling:local pipecat-validate --help

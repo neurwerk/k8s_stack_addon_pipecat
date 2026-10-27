@@ -1,0 +1,62 @@
+{{- if .Values.pipecat.enabled }}
+{{- $hosts := list (dict "name" "pipecat" "hostname" .Values.pipecat.hostname) }}
+{{- if .Values.pipecat.turn.enabled }}
+{{- $hosts = append $hosts (dict "name" "pipecat-turn" "hostname" .Values.pipecat.turn.hostname) }}
+{{- end }}
+{{- range $entry := $hosts }}
+{{- $host := required "Application and enabled TURN hostnames are required" $entry.hostname }}
+{{- if not (regexMatch `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$` $host) }}{{ fail "Expected an exact public hostname" }}{{ end }}
+{{- range $suffix := list "staging" "production" }}
+---
+apiVersion: policy.cert-manager.io/v1alpha1
+kind: CertificateRequestPolicy
+metadata:
+  name: cert-manager-public-{{ $entry.name }}-{{ $suffix }}
+spec:
+  allowed:
+    dnsNames: {values: [{{ $host | quote }}], required: true}
+    isCA: false
+    usages: [digital signature, key encipherment]
+  constraints:
+    minDuration: 2160h
+    maxDuration: 2160h
+    privateKey: {algorithm: RSA, minSize: 2048, maxSize: 2048}
+  selector:
+    issuerRef:
+      group: cert-manager.io
+      kind: ClusterIssuer
+      name: letsencrypt-{{ $suffix }}-cluster-issuer
+    namespace:
+      matchNames: [pipecat]
+{{- end }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-public-pipecat-use
+rules:
+  - apiGroups: [policy.cert-manager.io]
+    resources: [certificaterequestpolicies]
+    verbs: [use]
+    resourceNames:
+      - cert-manager-public-pipecat-staging
+      - cert-manager-public-pipecat-production
+      {{- if .Values.pipecat.turn.enabled }}
+      - cert-manager-public-pipecat-turn-staging
+      - cert-manager-public-pipecat-turn-production
+      {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-public-pipecat-use
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-public-pipecat-use
+subjects:
+  - kind: ServiceAccount
+    name: infra-cert-manager-controller
+    namespace: infra-cert-manager
+{{- end }}

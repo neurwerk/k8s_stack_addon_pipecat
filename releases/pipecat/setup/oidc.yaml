@@ -1,0 +1,27 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: keycloak-pipecat-oidc
+  namespace: auth-keycloak
+spec:
+  interval: 5m
+  timeout: 15m
+  dependsOn:
+    - {name: pipecat-identity-secrets}
+    - {name: pipecat-oidc-settings}
+    - {name: keycloak-pipecat-access}
+    - {name: keycloak-agentgateway-oidc}
+  chart:
+    spec:
+      chart: ./charts/keycloak/addon-oidc
+      sourceRef: {kind: GitRepository, name: k8s-stack, namespace: flux-system}
+  valuesFrom:
+    - {kind: ConfigMap, name: auth-keycloak-app-defaults}
+    - {kind: ConfigMap, name: client-values}
+    - {kind: ConfigMap, name: keycloak-product-values}
+    - {kind: ConfigMap, name: pipecat-oidc-approval-values}
+    # Derived from the same scoped product settings as runtime; enforce the resolved reference.
+    - {kind: ConfigMap, name: pipecat-oidc-settings}
+  values:
+    k8sTools:
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.14.0@sha256:a1db80f00e8579478382ecc34717af484cf75239008ae8dbe66b01632aa49305

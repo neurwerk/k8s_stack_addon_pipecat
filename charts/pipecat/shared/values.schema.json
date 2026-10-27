@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#", "type": "object",
+  "properties": {
+    "managedKeysOnly": {"type": "boolean"},
+    "registrationOnly": {"type": "boolean"},
+    "identityOnly": {"type": "boolean"},
+    "pipecat": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "oidc": {"type": "object", "properties": {
+          "enabled": {"type": "boolean"}, "clientId": {"type": "string"},
+          "secretName": {"type": "string"}, "secretKey": {"type": "string"}
+        }},
+        "secretSync": {"type": "object", "additionalProperties": false, "properties": {
+          "enabled": {"type": "boolean"},
+          "stores": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+        }},
+        "bots": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["id", "anonymous"],
+          "properties": {
+            "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
+            "anonymous": {"type": "boolean"}, "sessionsEnabled": {"type": "boolean"},
+            "modelId": {"type": "string", "minLength": 1},
+            "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][A-Za-z0-9:._/-]{0,255}$"}}
+          }}},
+        "turn": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "hostname": {"type": "string", "pattern": "^$|^[a-z0-9-]+(\\.[a-z0-9-]+)+$"},
+            "secretName": {"type": "string", "minLength": 1},
+            "image": {"type": "string", "pattern": "^[^ ]+:[^ @]+@sha256:[a-f0-9]{64}$"},
+            "clusterIssuer": {"type": "string", "minLength": 1},
+            "advertisedAddress": {"type": "string", "pattern": "^$|^[0-9]{1,3}(\\.[0-9]{1,3}){3}$"},
+            "udpNodePort": {"type": "integer", "minimum": 30000, "maximum": 32767},
+            "tlsNodePort": {"type": "integer", "minimum": 30000, "maximum": 32767},
+            "relayMinPort": {"type": "integer", "minimum": 30000, "maximum": 32767},
+            "relayMaxPort": {"type": "integer", "minimum": 30000, "maximum": 32767},
+            "publicUdpPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "publicTlsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+            "resources": {"type": "object", "required": ["requests", "limits"]}
+          }
+        },
+        "scriptStorage": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"}, "store": {"type": "string"},
+            "clusterNamespace": {"type": "string", "minLength": 1},
+            "bucket": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"}
+          }
+        },
+        "secretDeliveries": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "storeName", "fields"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "storeName": {"type": "string", "minLength": 1},
+              "fields": {
+                "type": "array", "minItems": 1,
+                "items": {"type": "object", "additionalProperties": false, "required": ["key", "path", "property"],
+                  "properties": {"key": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1}, "property": {"type": "string", "minLength": 1}}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

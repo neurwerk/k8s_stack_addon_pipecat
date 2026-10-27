@@ -1,0 +1,17 @@
+{{- if and .Values.pipecat.enabled (not (empty .Values.pipecat.bots)) }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pipecat
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: pipecat-tls
+  duration: 2160h
+  privateKey: {algorithm: RSA, size: 2048}
+  usages: [digital signature, key encipherment]
+  dnsNames: [{{ required "pipecat.hostname is required" .Values.pipecat.hostname | quote }}]
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.pipecat.clusterIssuer }}
+{{- end }}
