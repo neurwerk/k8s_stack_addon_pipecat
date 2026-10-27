@@ -1,3 +1,3 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: [shared.yaml, access.yaml, settings.yaml, oidc.yaml, certificate-approval.yaml, managed-keys.yaml, identity-secrets.yaml, machines.yaml]
+resources: [access.yaml, settings.yaml, oidc.yaml, certificate-approval.yaml, managed-keys.yaml, machines.yaml]

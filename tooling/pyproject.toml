@@ -1,20 +1,28 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "neurwerk-pipecat-tooling"
+name = "pipecat-tooling"
 version = "0.1.0"
-description = "Pipecat add-on selection and credential preparation."
+description = "Offline Pipecat add-on and product selection validation."
 readme = "README.md"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY.md"]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["k8s-stack-tooling==0.14.0"]
+
+[project.scripts]
+pipecat-validate = "pipecat_tooling.cli:main"
+
+[tool.uv.sources]
+k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.14.0/k8s_stack_tooling-0.14.0-py3-none-any.whl"}
+# Setup is a separate release; both artifacts are hash-pinned in uv.lock.
+openbao-stack-setup = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.7.0/openbao_stack_setup-0.7.0-py3-none-any.whl"}
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/neurwerk_pipecat_tooling"]
+packages = ["src/pipecat_tooling"]
 
 [tool.hatch.build.targets.sdist]
 exclude = ["cli_tools/"]
@@ -38,7 +46,7 @@ include = ["src", "tests"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.17", "ty>=0.0.49", "pytest>=8"]
+dev = ["ruff>=0.15.17", "ty>=0.0.49", "pytest>=8", "openbao-stack-setup==0.7.0"]
 
 [project.urls]
 Homepage = "https://github.com/neurwerk/k8s_stack_addon_pipecat"

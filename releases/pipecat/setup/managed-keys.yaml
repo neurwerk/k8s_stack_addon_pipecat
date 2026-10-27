@@ -15,3 +15,4 @@ spec:
     - {kind: ConfigMap, name: pipecat-product-values}
   values:
     managedKeysOnly: true
+    registrationOnly: true

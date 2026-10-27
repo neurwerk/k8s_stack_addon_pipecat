@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipecat-external-secrets
+  namespace: pipecat
+automountServiceAccountToken: false
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: pipecat-openbao-secret-store
+  namespace: pipecat
+spec:
+  provider:
+    vault:
+      server: https://infra-openbao.infra-openbao.svc:8200
+      path: secret
+      version: v2
+      caProvider:
+        type: ConfigMap
+        name: infra-openbao-ca-bundle
+        key: ca.crt
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: addon-pipecat-runtime
+          serviceAccountRef:
+            name: pipecat-external-secrets
+            audiences: [openbao]

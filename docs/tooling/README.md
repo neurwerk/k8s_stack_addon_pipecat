@@ -1,9 +1,18 @@
-# Pipecat-owned tooling
+# Pipecat tooling
 
-`tooling/` owns Pipecat selection, credential-record decisions, allowed readers, delivery targets and consumer-refresh resolution. It mirrors shared Tooling's `pyproject.toml`, lockfile, `src/<package>`, tests, Dockerfile and release workflow structure, omitting unrelated tools. Its MIT-derived source and reviewed domain tests retain their attribution in `tooling/THIRD_PARTY.md`.
+`tooling/` packages `pipecat-tooling` / `pipecat_tooling` with `pipecat-validate`. It imports the exact shared Tooling dependency for manifest parsing and ordinary values loading. Product code checks bot IDs, gateway permissions, independent speech choices and feature agreement. Credential recipes, readers and lifecycle targets live only in `release/manifest.yaml`; privileged preparation stays in shared setup.
 
-The voice runtime and add-on tooling are independent artifacts with independent package versions. The add-on tooling package/image must be public, matching this public repository. It has no default entrypoint, bootstrap, root-token acquisition, OpenBao HTTP transport or independent credential engine. Shared Tooling owns generic custody, committed-catalog validation, credential recipes/CAS, dedicated reader-role application and delivery after root revocation; the generic scoped Keycloak helper remains shared too.
+`make tooling-check` requires the reviewed release dependency lock. Publish shared SDK `v0.14.0` first, then setup `stack-setup-v0.7.0`; their separate wheel URLs are declared in `tooling/pyproject.toml`. Generate `tooling/uv.lock` only after both artifacts are available; never commit a candidate-local source or temporary lock. Required CI installs development dependencies, including exact setup `0.7.0`, and runs `make tooling-integration ADDON_BASE=/absolute/path/to/reviewed-base`. Missing setup or Base fails rather than skips. Candidate wheels installed outside Git can exercise the same target with an explicitly selected runner; they do not satisfy the release lock gate.
 
-Run `make tooling-check` for the mirrored lock/lint/format/`ty`/`pytest`/package checks; root `make check` includes it. `make tooling-image-build` builds only this image. Its public registry name is `ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling`, separate from the voice-runtime image. The `tooling/vX.Y.Z` release workflow verifies the tag, subproject version and lock, runs quality/build gates, preserves immutable existing image revisions and checks package visibility before release notes. Tags and publication require separate approval. Configure the protected publication environment and public GHCR package visibility before claiming availability; a newly created private package is a failed publication gate, not a public release.
+The image uses one locked environment on pinned Python/uv inputs, runs as UID 65532, and installs no dependencies at startup. `make tooling-build VERSION=<version> REVISION=<commit>` builds `ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling` from `tooling/`. Optional consumer declarations permit disabled bots, browser/machine identities, private scripts and TURN to be absent; when present, shared validation still checks their exact declared images.
 
-The generic committed-catalog/non-secret-plan extension is being integrated separately. No ad-hoc execution or Pipecat import into shared setup is supported. The add-on resolver must use the reviewed formal schema and committed Git objects before interoperability is available; a dirty catalog, unsupported plan or unpublished image is not permission to run reconciliation. Actual client identity and generated plans stay outside this public repository. No live operations or image publication are part of package checks.
+The installed command supports:
+
+```sh
+pipecat-validate /work/addon --list-packages
+pipecat-validate /work/addon --values /work/client/config/client.yaml --values /work/client/apps/pipecat/values.yaml --selection /work/client/config/addons.yaml
+```
+
+It validates only; it neither generates a second plan nor reads credentials. Shared setup verifies the complete selection and source revisions before custody. Runtime commands `pipecat-bundle` and `pipecat-turn-config` stay in the runtime image. There are no product-specific credential, Job-launch or refresh engines.
+
+See [selection and lifecycle](../architecture/README.md) and [release operations](../operations/README.md).

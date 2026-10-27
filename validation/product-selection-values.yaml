@@ -1,0 +1,25 @@
+# Nonsecret, offline example. No runtime image or deployment source is selected.
+pipecat:
+  enabled: true
+  hostname: voice.example.com
+  secretSync: {enabled: true}
+  oidc: {enabled: true, issuer: https://identity.example.com/realms/example}
+  turn: {enabled: false}
+  bots:
+    - id: voice-bot
+      urlSlug: voice_bot
+      anonymous: true
+      sessionsEnabled: false
+      modelId: example-model
+      gatewayPermissions: [llm:invoke, 'model:example-model:invoke']
+      stt:
+        secretRef: {name: pipecat-bot-voice-bot, key: sttApiKey}
+    - id: protected-bot
+      anonymous: false
+      sessionsEnabled: false
+  machineIdentityApprovals:
+    voice-bot:
+      clientId: pipecat-bot-voice-bot
+      realmRoles: []
+      gatewayPermissions: [llm:invoke, 'model:example-model:invoke']
+      audiences: [agentgateway]

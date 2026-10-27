@@ -1,4 +1,5 @@
 managedKeysOnly: false
+registrationOnly: false
 identityOnly: false
 pipecat:
   enabled: false

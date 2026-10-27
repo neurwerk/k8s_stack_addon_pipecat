@@ -9,11 +9,13 @@ import re
 from dataclasses import dataclass
 from typing import cast
 
+from k8s_stack_tooling.addons import Addon, Selection, expand_setup
+from k8s_stack_tooling.gateway_catalog.values import merge_values
+
 _ID = re.compile(r"[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?")
 _SLUG = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
 _PROVIDER_GRANT = re.compile(r"provider:[a-z0-9][a-z0-9-]{0,47}:company-use")
-_PREFIX = "addons/pipecat"
 _BRIDGE = "auth-keycloak-api-key-bridge"
 _RESERVED_IDS = {"turn", "product-values"}
 
@@ -48,72 +50,6 @@ class PipecatSelection:
     bots: tuple[PipecatBot, ...]
     managed: bool
 
-    def paths(self, namespace: str) -> tuple[str, ...]:
-        if not self.managed:
-            return ()
-        if namespace == "auth-keycloak":
-            return ((f"{_PREFIX}/oidc",) if self.oidc else ()) + tuple(
-                f"{_PREFIX}/machines/{bot.id}" for bot in self.bots if bot.gateway
-            )
-        if namespace == _BRIDGE:
-            return tuple(f"{_PREFIX}/verifiers/{bot.id}" for bot in self.bots if bot.gateway)
-        if namespace == "pipecat":
-            return (
-                ((f"{_PREFIX}/oidc",) if self.oidc else ())
-                + ((f"{_PREFIX}/turn",) if self.turn else ())
-                + tuple(
-                    f"{_PREFIX}/bots/{bot.id}" for bot in self.bots if bot.gateway or bot.speech
-                )
-            )
-        raise SelectionError("Invalid Pipecat delivery namespace")
-
-    def refresh_targets(self) -> RefreshTargets:
-        """Resolve only compiled targets; never accept workload names from user values."""
-        secrets: list[tuple[str, str]] = []
-        if self.oidc and self.managed:
-            secrets.extend(
-                (namespace, "pipecat-oidc-secret") for namespace in ("auth-keycloak", "pipecat")
-            )
-        if self.turn and self.managed:
-            secrets.append(("pipecat", "pipecat-turn-secret"))
-        for bot in self.bots:
-            name = f"pipecat-bot-{bot.id}"
-            if bot.gateway or bot.speech:
-                secrets.append(("pipecat", name))
-            if bot.gateway:
-                secrets.extend(((_BRIDGE, f"{name}-verifier"), ("auth-keycloak", f"{name}-oidc")))
-        consumers: list[tuple[str, str]] = []
-        if self.oidc:
-            consumers.extend(
-                ("auth-keycloak", name)
-                for name in (
-                    "pipecat-oidc-settings",
-                    "keycloak-pipecat-access",
-                    "keycloak-pipecat-oidc",
-                )
-            )
-        if any(bot.gateway for bot in self.bots):
-            consumers.extend(
-                (
-                    ("auth-keycloak", "keycloak-pipecat-machines"),
-                    (_BRIDGE, "pipecat-gateway-registrations"),
-                )
-            )
-        consumers.append(("pipecat", "pipecat-shared"))
-        deployments = [("pipecat", f"pipecat-{bot.id}") for bot in self.bots]
-        if self.turn:
-            deployments.append(("pipecat", "pipecat-turn"))
-        return RefreshTargets(tuple(secrets), tuple(consumers), tuple(deployments))
-
-
-@dataclass(frozen=True)
-class RefreshTargets:
-    """Domain resolution only; not the generic custody plan or an execution interface."""
-
-    external_secrets: tuple[tuple[str, str], ...]
-    helm_releases: tuple[tuple[str, str], ...]
-    deployments: tuple[tuple[str, str], ...]
-
 
 def select_pipecat_values(client_values: object, product_values: object) -> PipecatSelection:
     """Merge fixed shared/product inputs in the same order as the Helm releases."""
@@ -121,15 +57,44 @@ def select_pipecat_values(client_values: object, product_values: object) -> Pipe
         raise SelectionError("Invalid Pipecat values")
     shared = _settings(client_values, "pipecat")
     overrides = _settings(product_values, "pipecat")
-    combined = {**shared, **overrides}
-    for feature in ("oidc", "turn", "secretSync"):
-        defaults = _settings(shared, feature)
-        settings = _settings(overrides, feature)
-        merged = {**defaults, **settings}
-        if feature == "secretSync":
-            merged["stores"] = {**_settings(defaults, "stores"), **_settings(settings, "stores")}
-        combined[feature] = merged
+    from copy import deepcopy
+
+    combined = deepcopy(shared)
+    merge_values(combined, deepcopy(overrides))
     return select_pipecat(combined)
+
+
+def validate_selection(addon: Addon, selection: Selection, product: object) -> None:
+    """Compare product semantics with client selection; never generate a setup plan."""
+    domain = select_pipecat(product)
+    selected = next((row for row in selection.addons if row.id == "pipecat"), None)
+    if selected is None:
+        raise SelectionError("Pipecat is missing from complete selection")
+    expected = {
+        "oidc": domain.oidc,
+        "turn": domain.turn,
+        "managed-oidc": domain.managed and domain.oidc,
+        "managed-turn": domain.managed and domain.turn,
+    }
+    if addon.spec.features | selected.features != expected:
+        raise SelectionError("Pipecat shared features differ from product settings")
+    instances = {row.id: row for row in selected.instances}
+    if set(instances) != {bot.id for bot in domain.bots}:
+        raise SelectionError("Pipecat instances must match all selected bots")
+    recipes = {recipe.id: recipe for recipe in addon.spec.instance_recipes}
+    for bot in domain.bots:
+        instance = instances[bot.id]
+        if instance.recipe != "bot":
+            raise SelectionError("Pipecat bot requires the bot recipe")
+        features = recipes[instance.recipe].features | instance.features
+        if features != {
+            "runtime": bot.gateway or bool(bot.speech),
+            "gateway": bot.gateway,
+            "stt": "sttApiKey" in bot.speech,
+            "tts": "ttsApiKey" in bot.speech,
+        }:
+            raise SelectionError("Pipecat bot features differ from product settings")
+    expand_setup(addon, selected)
 
 
 def select_pipecat(product: object) -> PipecatSelection:
@@ -173,7 +138,22 @@ def select_pipecat(product: object) -> PipecatSelection:
         slugs.add(slug)
         anonymous = row["anonymous"]
         protected |= not anonymous
-        bots.append(_select_bot(row, identity, anonymous, managed))
+        bot = _select_bot(row, identity, anonymous, managed)
+        if bot.gateway:
+            approval = _settings(_settings(product, "machineIdentityApprovals"), identity)
+            approved_permissions = approval.get("gatewayPermissions")
+            if (
+                set(approval) != {"clientId", "realmRoles", "gatewayPermissions", "audiences"}
+                or approval.get("clientId") != f"pipecat-bot-{identity}"
+                or approval.get("realmRoles") != []
+                or approval.get("audiences") != ["agentgateway"]
+                or not isinstance(approved_permissions, list)
+                or not all(isinstance(value, str) for value in approved_permissions)
+                or sorted(approved_permissions)
+                != sorted(cast(list[str], row["gatewayPermissions"]))
+            ):
+                raise SelectionError("Pipecat machine requires explicit matching client approval")
+        bots.append(bot)
     oidc = _settings(product, "oidc")
     oidc_enabled = _enabled(oidc, protected)
     if protected and not oidc_enabled:

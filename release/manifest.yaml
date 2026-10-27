@@ -1,4 +1,4 @@
-apiVersion: addons.neurwerk.com/v1alpha1
+apiVersion: addons.neurwerk.com/v1alpha2
 kind: AddonRelease
 metadata:
   name: pipecat
@@ -8,10 +8,13 @@ spec:
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
-    base: 0.3.29
-    tooling: 0.13.8
-    stackSetup: 0.6.6
+    base: 0.4.0
+    tooling: 0.14.0
+    stackSetup: 0.7.0
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
+    baseChartVersions:
+      charts/keycloak/addon-access: 0.1.6
+      charts/keycloak/addon-oidc: 0.2.0
   inputs:
     - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: client-values, owner: client}
     - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: pipecat-product-values, owner: client}
@@ -26,9 +29,12 @@ spec:
   packages:
     - name: namespaces
       path: releases/namespaces/pipecat
+    - name: secret-sync
+      path: releases/pipecat/secret-sync
+      dependsOn: [namespaces]
     - name: setup
       path: releases/pipecat/setup
-      dependsOn: [namespaces]
+      dependsOn: [secret-sync]
       helmOutputs:
         - kind: ConfigMap
           namespace: auth-keycloak
@@ -41,3 +47,191 @@ spec:
     databases: retain
     volumes: retain
     credentials: retain
+  features:
+    oidc: false
+    turn: false
+    managed-oidc: false
+    managed-turn: false
+  artifacts:
+    - id: tooling
+      role: product
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.0
+    - id: runtime
+      role: native
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.1.0
+    - id: coturn
+      role: native
+      image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93
+    - id: identity-provisioner
+      role: shared
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.14.0@sha256:a1db80f00e8579478382ecc34717af484cf75239008ae8dbe66b01632aa49305
+    - id: access-provisioner
+      role: shared
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.13.8@sha256:9cf6f1c744636f66a4b1985c29c24de1bb9c7ecb07e9c8f05e81dad56c9cf207
+  consumers:
+    - {artifact: tooling, kind: Command, argv: [pipecat-validate, /work/addon]}
+    - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: bot, optional: true}
+    - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: load-script, location: initContainers, optional: true}
+    - {artifact: runtime, package: secret-sync, kind: HelmRelease, namespace: pipecat, name: pipecat-shared, container: configure, location: initContainers, optional: true}
+    - {artifact: coturn, package: secret-sync, kind: HelmRelease, namespace: pipecat, name: pipecat-shared, container: turn, optional: true}
+    - {artifact: access-provisioner, package: setup, kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-access, container: reconcile}
+    - {artifact: identity-provisioner, package: setup, kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-oidc, container: configure, optional: true}
+    - {artifact: identity-provisioner, package: setup, kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-machines, container: configure, optional: true}
+  identities:
+    - id: browser
+      mode: browser
+      clientId: pipecat
+      secret: {record: oidc, field: clientSecret}
+      when: managed-oidc
+      browserSettings:
+        namespace: auth-keycloak
+        settings: pipecat-oidc-settings
+        approval: pipecat-oidc-approval-values
+  setup:
+    records:
+      - id: oidc
+        path: addons/pipecat/oidc
+        when: managed-oidc
+        fields:
+          clientSecret:
+            generate: {encoding: base64url, bytes: 32}
+            validation: {format: base64url, minLength: 43, maxLength: 43}
+      - id: turn
+        path: addons/pipecat/turn
+        when: managed-turn
+        fields:
+          sharedSecret:
+            generate: {encoding: hex, bytes: 32}
+            validation: {format: hex, minLength: 64, maxLength: 64}
+    readers:
+      - role: addon-pipecat-runtime
+        namespace: pipecat
+        serviceAccount: pipecat-external-secrets
+        audience: openbao
+        records: [oidc, turn]
+      - role: auth-keycloak
+        namespace: auth-keycloak
+        serviceAccount: auth-keycloak-external-secrets
+        audience: openbao
+        records: [oidc]
+    deliveries:
+      - namespace: pipecat
+        name: pipecat-oidc-secret
+        secretStore: pipecat-openbao-secret-store
+        targetSecret: pipecat-oidc-secret
+        records: [oidc]
+        when: managed-oidc
+      - namespace: auth-keycloak
+        name: pipecat-oidc-secret
+        secretStore: auth-keycloak-openbao-secret-store
+        targetSecret: pipecat-oidc-secret
+        records: [oidc]
+        when: managed-oidc
+      - namespace: pipecat
+        name: pipecat-turn-secret
+        secretStore: pipecat-openbao-secret-store
+        targetSecret: pipecat-turn-secret
+        records: [turn]
+        when: managed-turn
+    handover: []
+    lifecycle:
+      # ExternalSecret readiness includes its SecretStore dependency. No unconditional
+      # waits for empty stores or optional certificates/media are needed.
+      delivery:
+        - {kind: ExternalSecret, namespace: pipecat, name: pipecat-oidc-secret, when: managed-oidc}
+        - {kind: ExternalSecret, namespace: auth-keycloak, name: pipecat-oidc-secret, when: managed-oidc}
+        - {kind: ExternalSecret, namespace: pipecat, name: pipecat-turn-secret, when: managed-turn}
+      provision:
+        - {kind: HelmRelease, namespace: auth-keycloak, name: pipecat-oidc-settings, when: oidc}
+        - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-access, when: oidc}
+        - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-oidc, when: oidc}
+      restart:
+        - {kind: Deployment, namespace: pipecat, name: pipecat-turn, when: turn}
+      rotate: []
+  instanceRecipes:
+    - id: bot
+      features: {runtime: false, gateway: false, stt: false, tts: false}
+      setup:
+        records:
+          - id: runtime
+            path: addons/pipecat/bots/{instance}
+            fields:
+              gatewayApiKey:
+                when: gateway
+                generate: {encoding: base64url, bytes: 32}
+                validation: {format: base64url, minLength: 43, maxLength: 43}
+              sttApiKey:
+                when: stt
+                supplied: {group: speech, key: sttApiKey}
+                validation: {format: text, minLength: 1, maxLength: 16384}
+              ttsApiKey:
+                when: tts
+                supplied: {group: speech, key: ttsApiKey}
+                validation: {format: text, minLength: 1, maxLength: 16384}
+          - id: machine
+            path: addons/pipecat/machines/{instance}
+            when: gateway
+            fields:
+              clientSecret:
+                generate: {encoding: base64url, bytes: 32}
+                validation: {format: base64url, minLength: 43, maxLength: 43}
+          - id: verifier
+            path: addons/pipecat/verifiers/{instance}
+            when: gateway
+            fields:
+              gatewayApiKeySha256:
+                sha256: {record: runtime, field: gatewayApiKey}
+                validation: {format: sha256, minLength: 64, maxLength: 64}
+        inputGroups:
+          - id: speech
+            fields:
+              sttApiKey: {format: text, minLength: 1, maxLength: 16384}
+              ttsApiKey: {format: text, minLength: 1, maxLength: 16384}
+        readers:
+          - role: addon-pipecat-runtime
+            namespace: pipecat
+            serviceAccount: pipecat-external-secrets
+            audience: openbao
+            records: [runtime]
+          - role: auth-keycloak
+            namespace: auth-keycloak
+            serviceAccount: auth-keycloak-external-secrets
+            audience: openbao
+            records: [machine]
+          - role: auth-keycloak-api-key-bridge
+            namespace: auth-keycloak-api-key-bridge
+            serviceAccount: auth-keycloak-api-key-bridge-external-secrets
+            audience: openbao
+            records: [verifier]
+        deliveries:
+          - namespace: pipecat
+            name: pipecat-bot-{instance}
+            secretStore: pipecat-openbao-secret-store
+            targetSecret: pipecat-bot-{instance}
+            records: [runtime]
+          - namespace: auth-keycloak
+            name: pipecat-bot-{instance}-oidc
+            secretStore: auth-keycloak-openbao-secret-store
+            targetSecret: pipecat-bot-{instance}-oidc
+            records: [machine]
+            when: gateway
+          - namespace: auth-keycloak-api-key-bridge
+            name: pipecat-bot-{instance}-verifier
+            secretStore: auth-keycloak-api-key-bridge-openbao-secret-store
+            targetSecret: pipecat-bot-{instance}-verifier
+            records: [verifier]
+            when: gateway
+        handover: []
+        lifecycle:
+          delivery:
+            - {kind: ExternalSecret, namespace: pipecat, name: 'pipecat-bot-{instance}', when: runtime}
+            - {kind: ExternalSecret, namespace: auth-keycloak, name: 'pipecat-bot-{instance}-oidc', when: gateway}
+            - {kind: ExternalSecret, namespace: auth-keycloak-api-key-bridge, name: 'pipecat-bot-{instance}-verifier', when: gateway}
+          provision:
+            - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-access, when: gateway}
+            - {kind: HelmRelease, namespace: auth-keycloak, name: keycloak-pipecat-machines, when: gateway}
+            - {kind: HelmRelease, namespace: auth-keycloak-api-key-bridge, name: pipecat-gateway-registrations, when: gateway}
+            - {kind: HelmRelease, namespace: auth-keycloak-api-key-bridge, name: keycloak-api-key-bridge, when: gateway}
+          restart:
+            - {kind: Deployment, namespace: pipecat, name: 'pipecat-{instance}'}
+          rotate: []

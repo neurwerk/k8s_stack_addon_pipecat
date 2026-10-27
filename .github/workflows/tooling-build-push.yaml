@@ -26,11 +26,13 @@ jobs:
           from pathlib import Path
           project=tomllib.loads(Path('tooling/pyproject.toml').read_text())
           lock=tomllib.loads(Path('tooling/uv.lock').read_text())
-          locked=next(p['version'] for p in lock['package'] if p['name']=='neurwerk-pipecat-tooling')
+          locked=next(p['version'] for p in lock['package'] if p['name']=='pipecat-tooling')
           if {project['project']['version'],locked} != {os.environ['RELEASE_VERSION']}:
               raise SystemExit('Tooling tag, project and lock versions must match')
           PY
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.7"
       - run: uv lock --check
         working-directory: tooling
   quality:
@@ -91,6 +93,9 @@ jobs:
         id: build
         with:
           context: tooling
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
@@ -100,20 +105,50 @@ jobs:
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Resolve digest and verify public package visibility
+      - name: Resolve digest awaiting anonymous verification
         id: resolve
         env:
           BUILT_DIGEST: ${{ steps.build.outputs.digest }}
           EXISTING_DIGEST: ${{ steps.inspect.outputs.digest }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          visibility="$(gh api /orgs/neurwerk/packages/container/k8s-stack-addon-pipecat-tooling --jq .visibility)"
-          test "$visibility" = public
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-  release:
+          echo "Published $digest; public verification is pending. First publication requires a package administrator to change GHCR visibility to Public." >> "$GITHUB_STEP_SUMMARY"
+  verify-public:
     needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify anonymous image access and metadata
+        env:
+          DIGEST: ${{ needs.build.outputs.digest }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -eu -o pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          version="${GITHUB_REF_NAME#tooling/v}"
+          export DOCKER_CONFIG="$(mktemp -d)"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          echo '{"auths":{}}' > "$DOCKER_CONFIG/config.json"
+          image="$REGISTRY/$IMAGE_NAME"
+          docker pull --platform linux/amd64 "$image:$version"
+          docker image inspect "$image:$version" > "$RUNNER_TEMP/pipecat-tooling-image.json"
+          jq -e --arg digest "$image@$DIGEST" --arg version "$version" --arg revision "$REVISION" '
+            .[0] | (.RepoDigests | index($digest)) != null and
+            .Os == "linux" and .Architecture == "amd64" and
+            .Config.Labels["org.opencontainers.image.version"] == $version and
+            .Config.Labels["org.opencontainers.image.revision"] == $revision and
+            .Config.Labels["org.opencontainers.image.source"] == "https://github.com/neurwerk/k8s_stack_addon_pipecat"
+          ' "$RUNNER_TEMP/pipecat-tooling-image.json" > /dev/null
+          docker pull --platform linux/amd64 "$image@$DIGEST"
+      - name: Report pending public verification
+        if: failure()
+        run: |
+          echo 'Public verification failed. Inspect the failed check; if GHCR visibility is private, change it manually to Public, then Re-run failed jobs. Do not overwrite the image tag.' >> "$GITHUB_STEP_SUMMARY"
+  release:
+    needs: [build, verify-public]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -131,5 +166,5 @@ jobs:
             current="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
             [[ "$current" == *"$IMAGE_DIGEST"* ]]
           else
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TAG" --notes "$notes"
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Pipecat Neurwerk add-on tooling v$version" --notes "$notes"
           fi

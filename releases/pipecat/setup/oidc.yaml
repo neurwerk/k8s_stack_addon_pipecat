@@ -17,11 +17,11 @@ spec:
       sourceRef: {kind: GitRepository, name: k8s-stack, namespace: flux-system}
   valuesFrom:
     - {kind: ConfigMap, name: auth-keycloak-app-defaults}
-    - {kind: ConfigMap, name: pipecat-oidc-settings}
     - {kind: ConfigMap, name: client-values}
     - {kind: ConfigMap, name: keycloak-product-values}
     - {kind: ConfigMap, name: pipecat-oidc-approval-values}
+    # Derived from the same scoped product settings as runtime; enforce the resolved reference.
+    - {kind: ConfigMap, name: pipecat-oidc-settings}
   values:
     k8sTools:
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.13.8@sha256:9cf6f1c744636f66a4b1985c29c24de1bb9c7ecb07e9c8f05e81dad56c9cf207
-    clientSecret: {name: pipecat-oidc-secret, key: clientSecret}
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.14.0@sha256:a1db80f00e8579478382ecc34717af484cf75239008ae8dbe66b01632aa49305

@@ -12,19 +12,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: neurwerk/k8s_stack_tooling
-          ref: 4c66ee24566f151b9726d5faf9819740670387df
-          path: build/tooling
-      - uses: actions/checkout@v4
-        with:
           repository: neurwerk/k8s_stack_base
-          ref: v0.3.29
+          ref: v0.4.0
           path: build/base
       - uses: jdx/mise-action@v2
       - run: uv sync --frozen
       - run: npm ci
         working-directory: frontend
-      - run: make check WORKSPACE_ROOT="$GITHUB_WORKSPACE/build" ADDON_TOOLING="$GITHUB_WORKSPACE/build/tooling"
+      - run: make check BASE="$GITHUB_WORKSPACE/build/base"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:

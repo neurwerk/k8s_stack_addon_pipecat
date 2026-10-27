@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#", "type": "object",
   "properties": {
     "managedKeysOnly": {"type": "boolean"},
+    "registrationOnly": {"type": "boolean"},
     "identityOnly": {"type": "boolean"},
     "pipecat": {
       "type": "object",
@@ -15,7 +16,7 @@
           "enabled": {"type": "boolean"},
           "stores": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
         }},
-        "bots": {"type": "array", "items": {"type": "object", "required": ["id", "anonymous"],
+        "bots": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["id", "anonymous"],
           "properties": {
             "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
             "anonymous": {"type": "boolean"}, "sessionsEnabled": {"type": "boolean"},

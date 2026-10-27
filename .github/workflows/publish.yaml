@@ -18,6 +18,8 @@ jobs:
   publish:
     environment: image-publication
     runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,7 +74,51 @@ jobs:
             org.opencontainers.image.source=https://github.com/neurwerk/k8s_stack_addon_pipecat
             org.opencontainers.image.revision=${{ inputs.revision }}
             org.opencontainers.image.version=${{ inputs.version }}
-      - name: Record digest (pins are a separate change)
+      - name: Record publication awaiting public verification
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: echo "Published digest $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "Published $DIGEST; public availability is NOT yet verified." >> "$GITHUB_STEP_SUMMARY"
+          echo 'If anonymous verification fails because the package is private, a package administrator must change GHCR visibility to Public, then re-run only the failed verify-public job.' >> "$GITHUB_STEP_SUMMARY"
+  verify-public:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Pull and inspect anonymously on a fresh runner
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          VERSION: ${{ inputs.version }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -eu -o pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]]
+          export DOCKER_CONFIG="$(mktemp -d)"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          # No login, credential helper, or authenticated build cache in this job.
+          echo '{"auths":{}}' > "$DOCKER_CONFIG/config.json"
+          repository=ghcr.io/neurwerk/k8s-stack-addon-pipecat
+          docker pull --platform linux/amd64 "$repository:$VERSION"
+          docker image inspect "$repository:$VERSION" > "$RUNNER_TEMP/pipecat-image.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ['RUNNER_TEMP'] + '/pipecat-image.json') as stream:
+              image, = json.load(stream)
+          expected = 'ghcr.io/neurwerk/k8s-stack-addon-pipecat@' + os.environ['DIGEST']
+          assert expected in image['RepoDigests'], 'Version tag does not match published digest'
+          assert (image['Os'], image['Architecture']) == ('linux', 'amd64')
+          labels = image['Config']['Labels']
+          assert labels['org.opencontainers.image.source'] == 'https://github.com/neurwerk/k8s_stack_addon_pipecat'
+          assert labels['org.opencontainers.image.revision'] == os.environ['REVISION']
+          assert labels['org.opencontainers.image.version'] == os.environ['VERSION']
+          PY
+          docker pull --platform linux/amd64 "$repository@$DIGEST"
+          echo "Anonymous linux/amd64 pull, version/digest and OCI labels verified: $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Report pending public verification
+        if: failure()
+        run: |
+          echo 'Public verification failed; the image is not verified for public consumption. Inspect the failed check. If visibility is private, a package administrator must change it to Public, then use Re-run failed jobs for verify-public. Do not rerun publication or overwrite the version tag.' >> "$GITHUB_STEP_SUMMARY"

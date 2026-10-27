@@ -23,7 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["ruff>=0.15,<1", "mypy>=1.19,<2", "types-boto3[s3]>=1.42,<2"]
+dev = ["ruff>=0.15,<1", "mypy>=1.19,<2", "types-boto3[s3]>=1.42,<2", "PyYAML>=6.0,<7"]
 
 [tool.ruff]
 line-length = 100

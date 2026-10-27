@@ -22,6 +22,9 @@ metadata:
 data:
   values.yaml: |
     enabled: {{ not (empty $callbacks) }}
+    clientSecret:
+      name: {{ required "pipecat.oidc.secretName is required" $p.oidc.secretName | quote }}
+      key: {{ required "pipecat.oidc.secretKey is required" $p.oidc.secretKey | quote }}
     authentication:
       clientId: {{ $p.oidc.clientId | quote }}
       redirectUris: {{ $callbacks | toJson }}

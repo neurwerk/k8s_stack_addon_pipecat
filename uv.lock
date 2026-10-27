@@ -663,6 +663,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "types-boto3", extra = ["s3"] },
 ]
@@ -680,6 +681,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.19,<2" },
+    { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", specifier = ">=0.15,<1" },
     { name = "types-boto3", extras = ["s3"], specifier = ">=1.42,<2" },
 ]
