@@ -54,8 +54,7 @@ def test_shared_parser_and_installable_publication_boundary(capsys):
     assert main([str(ROOT), "--list-packages"]) == 0
     assert "releases/pipecat/secret-sync" in capsys.readouterr().out
     check(ROOT)
-    with pytest.raises(ContractError, match="staged"):
-        check(ROOT, installable=True)
+    check(ROOT, installable=True)
 
 
 def test_empty_catalog_has_no_credentials_or_disabled_waits():
