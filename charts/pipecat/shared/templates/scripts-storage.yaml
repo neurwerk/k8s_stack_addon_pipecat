@@ -24,7 +24,7 @@ metadata:
   annotations:
     helm.sh/resource-policy: keep
     kustomize.toolkit.fluxcd.io/prune: disabled
-provisioner: {{ printf "%s.ceph.rook.io/bucket" $s.clusterNamespace }}
+provisioner: {{ required "scriptStorage.provisioner must match the Rook operator's bucket provisioner" $s.provisioner | quote }}
 reclaimPolicy: Retain
 parameters:
   objectStoreName: {{ $s.store }}

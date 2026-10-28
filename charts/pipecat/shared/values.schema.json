@@ -46,6 +46,7 @@
           "properties": {
             "enabled": {"type": "boolean"}, "store": {"type": "string"},
             "clusterNamespace": {"type": "string", "minLength": 1},
+            "provisioner": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?/bucket$"},
             "bucket": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"}
           }
         },

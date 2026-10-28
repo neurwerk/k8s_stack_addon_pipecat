@@ -36,6 +36,9 @@ pipecat:
     enabled: false
     store: ""
     clusterNamespace: infra-rook-ceph
+    # Match the operator's OBC provisioner; it is not derived from the store namespace.
+    # Changing an existing StorageClass provisioner requires an approved replacement.
+    provisioner: ceph.rook.io/bucket
     bucket: ""
     # Rook must allowUsersInNamespaces: [pipecat]. The reader Secret is
     # rook-ceph-object-user-<store>-pipecat-script-reader in pipecat,
