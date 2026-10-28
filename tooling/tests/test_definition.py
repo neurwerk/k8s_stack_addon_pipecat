@@ -235,6 +235,10 @@ def test_all_effective_image_consumers_and_machine_approvals(media_enabled):
         "secretName": "existing-script-reader",
     }
     values["pipecat"]["turn"]["enabled"] = media_enabled
+    values["pipecat"]["turn"].update(
+        advertisedAddress="192.0.2.10",
+        nodeSelector={"kubernetes.io/hostname": "example-turn-node"},
+    )
     if not media_enabled:
         for bot in values["pipecat"]["bots"]:
             bot["sessionsEnabled"] = False

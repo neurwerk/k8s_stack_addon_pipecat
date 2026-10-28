@@ -115,7 +115,6 @@ def select_pipecat(product: object) -> PipecatSelection:
     identities: set[str] = set()
     slugs: set[str] = set()
     bots: list[PipecatBot] = []
-    protected = False
     for row in rows:
         if not isinstance(row, dict):
             raise SelectionError("Invalid Pipecat bot catalog")
@@ -132,12 +131,12 @@ def select_pipecat(product: object) -> PipecatSelection:
             or slug in ("healthz", "assets")
             or type(row.get("anonymous")) is not bool
             or type(row.get("sessionsEnabled", False)) is not bool
+            or type(row.get("enabled", True)) is not bool
         ):
             raise SelectionError("Invalid or duplicate Pipecat bot ID or URL slug")
         identities.add(identity)
         slugs.add(slug)
         anonymous = row["anonymous"]
-        protected |= not anonymous
         bot = _select_bot(row, identity, anonymous, managed)
         if bot.gateway:
             approval = _settings(_settings(product, "machineIdentityApprovals"), identity)
@@ -155,9 +154,9 @@ def select_pipecat(product: object) -> PipecatSelection:
                 raise SelectionError("Pipecat machine requires explicit matching client approval")
         bots.append(bot)
     oidc = _settings(product, "oidc")
-    oidc_enabled = _enabled(oidc, protected)
-    if protected and not oidc_enabled:
-        raise SelectionError("Protected Pipecat bots require OIDC")
+    oidc_enabled = _enabled(oidc, bool(rows))
+    if rows and not oidc_enabled:
+        raise SelectionError("All Pipecat bots require OIDC, including anonymous and disabled bots")
     if (
         managed
         and oidc_enabled
