@@ -1,8 +1,7 @@
 pipecat:
   enabled: false
   hostname: ""
-  # Unavailable until separately approved publication and digest verification.
-  image: ""
+  image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.1.0@sha256:0999715219c80b41d96078e761b4afa82f5beba53a46eaa92e64fb129d3b9b70
   gatewayOrigin: ""
   ingressClassName: traefik
   clusterIssuer: letsencrypt-production-cluster-issuer

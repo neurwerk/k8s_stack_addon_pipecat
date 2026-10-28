@@ -4,7 +4,8 @@ metadata:
   name: pipecat
 spec:
   version: 0.1.0
-  status: staged
+  # Published artifacts permit alpha installation; live browser/media acceptance is pending.
+  status: ready
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
@@ -56,10 +57,10 @@ spec:
   artifacts:
     - id: tooling
       role: product
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.0@sha256:f05fc23ce5f2b52c2b210cee505769f35ae34a8e9845e7d9f870d84fba8e9b1b
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.1@sha256:4ac12e87d372dff300498ef60b9279671e5c86bfc5b493a583ae3f619c23cdbe
     - id: runtime
       role: native
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.1.0
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.1.0@sha256:0999715219c80b41d96078e761b4afa82f5beba53a46eaa92e64fb129d3b9b70
     - id: coturn
       role: native
       image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93

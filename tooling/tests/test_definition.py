@@ -50,12 +50,11 @@ def render(values: dict, namespace: str, mode: dict | None = None) -> list[dict]
     return [row for row in yaml.safe_load_all(result.stdout) if row]
 
 
-def test_shared_parser_and_staged_publication_boundary(capsys):
+def test_shared_parser_and_installable_publication_boundary(capsys):
     assert main([str(ROOT), "--list-packages"]) == 0
     assert "releases/pipecat/secret-sync" in capsys.readouterr().out
     check(ROOT)
-    with pytest.raises(ContractError):
-        check(ROOT, installable=True)
+    check(ROOT, installable=True)
 
 
 def test_empty_catalog_has_no_credentials_or_disabled_waits():
