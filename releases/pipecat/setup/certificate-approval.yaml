@@ -11,3 +11,4 @@ spec:
       sourceRef: {kind: GitRepository, name: pipecat-addon, namespace: flux-system}
   valuesFrom:
     - {kind: ConfigMap, name: client-values}
+    - {kind: ConfigMap, name: pipecat-product-values}

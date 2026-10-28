@@ -26,6 +26,7 @@ spec:
     - {kind: ConfigMap, namespace: auth-keycloak, name: pipecat-product-values, owner: client}
     - {kind: ConfigMap, namespace: auth-keycloak, name: pipecat-oidc-approval-values, owner: client}
     - {kind: ConfigMap, namespace: infra-cert-manager, name: client-values, owner: client}
+    - {kind: ConfigMap, namespace: infra-cert-manager, name: pipecat-product-values, owner: client}
   packages:
     - name: namespaces
       path: releases/namespaces/pipecat

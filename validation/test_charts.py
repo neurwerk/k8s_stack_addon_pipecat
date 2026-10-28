@@ -17,20 +17,22 @@ class DeploymentBehaviorTests(unittest.TestCase):
         self.values = yaml.safe_load((ROOT / "validation/values.yaml").read_text())
 
     def render(self, chart, values=None, namespace="pipecat", error=None):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as stream:
-            yaml.safe_dump(values or self.values, stream)
-            stream.flush()
+        inputs = values if isinstance(values, list) else [values or self.values]
+        with tempfile.TemporaryDirectory() as directory:
+            command = [
+                "helm",
+                "template",
+                "pipecat",
+                str(ROOT / "charts/pipecat" / chart),
+                "--namespace",
+                namespace,
+            ]
+            for index, data in enumerate(inputs):
+                path = Path(directory) / f"values-{index}.yaml"
+                path.write_text(yaml.safe_dump(data))
+                command += ["-f", str(path)]
             result = subprocess.run(
-                [
-                    "helm",
-                    "template",
-                    "pipecat",
-                    str(ROOT / "charts/pipecat" / chart),
-                    "--namespace",
-                    namespace,
-                    "-f",
-                    stream.name,
-                ],
+                command,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -248,3 +250,47 @@ class DeploymentBehaviorTests(unittest.TestCase):
         self.values["pipecat"]["turn"]["peerAddressRanges"] = ["10.42.0.1-10.42.0.254"]
         self.values["pipecat"]["turn"]["nodeSelector"] = {}
         self.render("shared", error="turn.nodeSelector must pin the relay")
+
+    def test_certificate_approval_uses_layered_product_turn_hostname(self):
+        release = yaml.safe_load(
+            (ROOT / "releases/pipecat/setup/certificate-approval.yaml").read_text()
+        )
+        sources = {
+            "client-values": {
+                "pipecat": {
+                    "enabled": True,
+                    "hostname": "voice.example.com",
+                    "turn": {"enabled": False, "hostname": ""},
+                },
+            },
+            "pipecat-product-values": {
+                "pipecat": {"turn": {"enabled": True, "hostname": "turn.example.com"}},
+            },
+        }
+
+        def render(error=None):
+            inputs = [sources[ref["name"]] for ref in release["spec"]["valuesFrom"]]
+            return self.render(
+                "certificate-approval", inputs, release["metadata"]["namespace"], error=error
+            )
+
+        resources = render()
+        policies = {
+            item["metadata"]["name"]: item["spec"]
+            for item in resources
+            if item["kind"] == "CertificateRequestPolicy"
+        }
+        for suffix in ("staging", "production"):
+            for name, hostname in (
+                ("pipecat", "voice.example.com"),
+                ("pipecat-turn", "turn.example.com"),
+            ):
+                policy = policies[f"cert-manager-public-{name}-{suffix}"]
+                self.assertEqual(
+                    policy["allowed"]["dnsNames"], {"values": [hostname], "required": True}
+                )
+                self.assertEqual(policy["selector"]["namespace"], {"matchNames": ["pipecat"]})
+        role = next(item for item in resources if item["kind"] == "ClusterRole")
+        self.assertEqual(set(role["rules"][0]["resourceNames"]), set(policies))
+        sources["pipecat-product-values"]["pipecat"]["turn"]["hostname"] = ""
+        render(error="Application and enabled TURN hostnames are required")
