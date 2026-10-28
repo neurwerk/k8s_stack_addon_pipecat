@@ -1,0 +1,5 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+body { margin: 0; background: var(--background); }
+[hidden] { display: none !important; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+audio { max-height: 2.5rem; }

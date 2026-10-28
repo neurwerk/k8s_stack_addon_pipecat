@@ -1,0 +1,18 @@
+{
+  "frontend": {
+    "repository": "https://github.com/pipecat-ai/pipecat-examples",
+    "revision": "baa444fcef636c41e1cdfa76cea7af4d424d357e",
+    "path": "simple-chatbot/client/react",
+    "adaptations": "Static Vite build, Keycloak session controls, delegated gateway notices, voice-only protocol; no Daily, camera or debug events panel. Registry components retained from upstream."
+  },
+  "registry": {
+    "repository": "https://github.com/pipecat-ai/pipecat-ui",
+    "inspectedRevision": "32b15793b3f210abcff04121f22396634842cead",
+    "source": "Pipecat UI components vendored by the pinned examples revision"
+  },
+  "backend": {
+    "repository": "https://github.com/pipecat-ai/pipecat-examples",
+    "revision": "6ede04385ac2cf1d3a4cd0863a5dd33969ceccae",
+    "path": "simple-chatbot/server/bot-openai.py"
+  }
+}

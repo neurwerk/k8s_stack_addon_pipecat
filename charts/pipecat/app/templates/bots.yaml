@@ -68,7 +68,8 @@
 {{- $_ := set $config "idle_seconds" ($bot.idleSeconds | default 120) }}
 {{- $_ := set $config "max_connections" ($bot.maxConnections | default 4) }}
 {{- $script := $bot.script | default dict }}
-{{- $_ := set $config "script" (ternary "/scripts/bundle" "bundled" ($script.enabled | default false)) }}
+{{- if not $script.enabled }}{{ fail "Enabled apps require an immutable complete app bundle in script settings" }}{{ end }}
+{{- $_ := set $config "script" "/scripts/bundle" }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -97,6 +98,7 @@ spec:
       labels: *labels
       annotations:
         checksum/config: {{ $config | toJson | sha256sum }}
+        checksum/bundle: {{ $script | toJson | sha256sum }}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -147,6 +149,7 @@ spec:
           resources: {{ toYaml $p.resources | nindent 12 }}
           env:
             - {name: PIPECAT_CONFIG, value: /config/config.json}
+            - {name: BUNDLE_TARGET, value: /scripts/bundle}
             - {name: PIPECAT_SMART_TURN_LOG_DATA, value: "false"}
             - {name: NUMBA_CACHE_DIR, value: /tmp/numba}
             - {name: PYTHONDONTWRITEBYTECODE, value: "1"}

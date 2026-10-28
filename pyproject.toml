@@ -1,20 +1,16 @@
 [project]
 name = "neurwerk-pipecat"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-hosted voice bots with delegated AgentGateway access"
 requires-python = ">=3.12,<3.13"
 license = "BSD-2-Clause"
 dependencies = [
   "pipecat-ai[webrtc,silero]==1.14.0",
-  "fastapi>=0.135,<1",
-  "uvicorn>=0.42,<1",
-  "httpx>=0.28,<1",
-  "PyJWT[crypto]>=2.12,<3",
   "boto3>=1.42,<2",
 ]
 
 [project.scripts]
-neurwerk-pipecat = "neurwerk_pipecat.server:main"
+neurwerk-pipecat = "neurwerk_pipecat.startup:main"
 pipecat-bundle = "neurwerk_pipecat.bundle:main"
 pipecat-turn-config = "neurwerk_pipecat.turn:main"
 
@@ -23,7 +19,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["ruff>=0.15,<1", "mypy>=1.19,<2", "types-boto3[s3]>=1.42,<2", "PyYAML>=6.0,<7"]
+dev = ["ruff>=0.15,<1", "mypy>=1.19,<2", "types-boto3[s3]>=1.42,<2", "PyYAML>=6.0,<7", "fastapi==0.162.0", "uvicorn==0.54.0", "PyJWT[crypto]==2.15.1", "httpx==0.28.1"]
 
 [tool.ruff]
 line-length = 100

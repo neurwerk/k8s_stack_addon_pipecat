@@ -3,9 +3,9 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.1.0
-  # Published artifacts permit alpha installation; live browser/media acceptance is pending.
-  status: ready
+  version: 0.2.0
+  # Source preparation only: publish and verify the 0.2.0 runtime/tooling, then update pins.
+  status: staged
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
@@ -55,6 +55,8 @@ spec:
     managed-oidc: false
     managed-turn: false
   artifacts:
+    # Last published pins, not compatible app-bundle artifacts for this staged source.
+    # Keep unavailable until a separate verified artifact-pin change marks it ready.
     - id: tooling
       role: product
       image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.1@sha256:4ac12e87d372dff300498ef60b9279671e5c86bfc5b493a583ae3f619c23cdbe
