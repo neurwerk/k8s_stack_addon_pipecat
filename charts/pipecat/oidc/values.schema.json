@@ -19,6 +19,7 @@
             }}
         }, "additionalProperties": false},
         "bots": {"type": "array", "items": {"type": "object", "required": ["id", "anonymous"],
+          "allOf": [{"properties": {"enabled": {"type": "boolean", "default": true}}}],
           "properties": {"id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}}, "urlSlug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "anonymous": {"type": "boolean"}, "sessionsEnabled": {"type": "boolean"}, "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}}}},
         "oidc": {"type": "object", "properties": {
           "enabled": {"type": "boolean"},

@@ -1,6 +1,8 @@
 {{- if and .Values.pipecat.enabled .Values.pipecat.turn.enabled (not .Values.managedKeysOnly) (not .Values.identityOnly) }}
 {{- $t := .Values.pipecat.turn }}
 {{- $host := required "turn.hostname is required" $t.hostname }}
+{{- $address := required "turn.advertisedAddress requires the public IPv4 address with port-preserving UDP relay forwarding" $t.advertisedAddress }}
+{{- if empty $t.nodeSelector }}{{ fail "turn.nodeSelector must pin the relay to the node receiving public listener and relay forwarding" }}{{ end }}
 {{- if or (gt (int $t.relayMinPort) (int $t.relayMaxPort)) (gt (sub (int $t.relayMaxPort) (int $t.relayMinPort)) 63) }}{{ fail "TURN relay range must contain 1-64 ports" }}{{ end }}
 {{- if or (and (ge (int $t.udpNodePort) (int $t.relayMinPort)) (le (int $t.udpNodePort) (int $t.relayMaxPort))) (and (ge (int $t.tlsNodePort) (int $t.relayMinPort)) (le (int $t.tlsNodePort) (int $t.relayMaxPort))) }}{{ fail "TURN listener and relay NodePorts must not overlap" }}{{ end }}
 ---
@@ -31,14 +33,14 @@ data:
     max-port={{ $t.relayMaxPort }}
     realm={{ $host }}
     server-name={{ $host }}
-    {{- if $t.advertisedAddress }}
-    external-ip={{ $t.advertisedAddress }}
-    {{- end }}
+    external-ip={{ $address }}
     use-auth-secret
     fingerprint
     cert=/tls/tls.crt
     pkey=/tls/tls.key
     no-dtls
+    no-tlsv1
+    no-tlsv1_1
     no-cli
     no-tcp-relay
     no-multicast-peers
@@ -67,6 +69,8 @@ kind: Deployment
 metadata:
   name: pipecat-turn
   namespace: {{ .Release.Namespace }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ printf "pipecat-turn-tls,%s" $t.secretName | quote }}
 spec:
   replicas: 1
   strategy: {type: Recreate}

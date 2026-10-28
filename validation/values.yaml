@@ -8,6 +8,8 @@ pipecat:
   turn:
     enabled: true
     hostname: turn.example.com
+    advertisedAddress: 203.0.113.10
+    nodeSelector: {kubernetes.io/hostname: relay-example}
   gatewayOrigin: https://gateway.example.com
   oidc:
     issuer: https://identity.example.com/realms/example

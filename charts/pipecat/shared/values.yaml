@@ -11,12 +11,17 @@ pipecat:
     secretName: pipecat-turn-secret
     image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93
     clusterIssuer: letsencrypt-production-cluster-issuer
-    # Leave empty until the public relay NAT mapping is approved and configured.
+    # Required when enabled: public IPv4 with port-preserving UDP relay NAT.
     advertisedAddress: ""
     udpNodePort: 30478
     tlsNodePort: 30549
     relayMinPort: 31000
     relayMaxPort: 31015
+    # Required: select the single node receiving the public forwarding.
+    # Forward UDP publicUdpPort -> udpNodePort, TCP publicTlsPort -> tlsNodePort
+    # (TLS passthrough), and every relay UDP port unchanged. TLS alone is not enough.
+    # Add pipecat to the platform Reloader watch and RBAC namespace lists so
+    # certificate renewal and shared-secret rotation restart the TURN process.
     nodeSelector: {}
     resources:
       requests: {cpu: 100m, memory: 128Mi}
@@ -34,3 +39,9 @@ pipecat:
     store: ""
     clusterNamespace: infra-rook-ceph
     bucket: ""
+    # Rook must allowUsersInNamespaces: [pipecat]. The reader Secret is
+    # rook-ceph-object-user-<store>-pipecat-script-reader in pipecat,
+    # with AccessKey/SecretKey. Point each script.secretName and key fields there.
+    # The Rook operator must also allow OBC bucketOwner and bucketPolicy settings.
+    # Never mount the OBC's pipecat-scripts Secret in bots: it contains owner
+    # credentials, not the reader's restricted credentials.

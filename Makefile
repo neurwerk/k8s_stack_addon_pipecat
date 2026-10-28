@@ -37,6 +37,7 @@ build:
 test:
 	@test -n "$(BASE)" || { echo 'Set BASE to the explicit Base candidate checkout'; exit 1; }
 	BASE="$(BASE)" uv run --frozen python -m unittest discover -s tests -v
+	uv run --frozen python -m unittest discover -s validation -p test_charts.py -v
 
 image-build:
 	docker build --tag neurwerk-pipecat:local .
