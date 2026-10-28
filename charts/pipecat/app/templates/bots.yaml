@@ -1,10 +1,7 @@
 {{- if .Values.pipecat.enabled }}
 {{- $p := .Values.pipecat }}
-{{- $protected := false }}
-{{- range $p.bots }}{{- if not .anonymous }}{{- $protected = true }}{{- end }}{{- end }}
-{{- $oidcEnabled := $protected }}
-{{- if hasKey $p.oidc "enabled" }}{{- $oidcEnabled = $p.oidc.enabled }}{{- end }}
-{{- if and $protected (not $oidcEnabled) }}{{ fail "Protected bots require OIDC" }}{{ end }}
+{{- $oidcEnabled := true }}
+{{- if and (hasKey $p.oidc "enabled") (not $p.oidc.enabled) }}{{ fail "All bots require OIDC integration; anonymous only controls application access" }}{{ end }}
 {{- $ids := dict }}
 {{- $slugs := dict }}
 {{- range $bot := $p.bots }}
@@ -14,6 +11,7 @@
 {{- $_ := set $slugs $slug true }}
 {{- if hasKey $ids $bot.id }}{{ fail "Bot IDs must be unique" }}{{ end }}
 {{- $_ := set $ids $bot.id true }}
+{{- if or (not (hasKey $bot "enabled")) $bot.enabled }}
 {{- $name := printf "pipecat-%s" $bot.id }}
 {{- $image := required "Publish and verify the runtime image before configuring bots" $p.image }}
 {{- $hostname := required "pipecat.hostname is required" $p.hostname }}
@@ -23,10 +21,11 @@
 {{- $credentials := dict }}
 {{- $sessions := $bot.sessionsEnabled | default false }}
 {{- $config := dict "bot_id" $bot.id "url_slug" $slug "sessions_enabled" $sessions "title" ($bot.title | default "Voice assistant") "public_origin" (printf "https://%s" $hostname) "anonymous" $anonymous "gateway_origin" $p.gatewayOrigin "binding_id" ($bot.bindingId | default "") "model_id" ($bot.modelId | default "") }}
+{{- with $bot.gatewayBaseUrl }}{{- $_ := set $config "gateway_base_url" . }}{{- end }}
 {{- if $p.turn.enabled }}
 {{- $_ := set $credentials "turn" (dict "name" $p.turn.secretName "key" "sharedSecret") }}
 {{- $_ := set $config "turn_secret" (dict "file" "/credentials/turn/value") }}
-{{- $_ := set $config "turn_urls" (list (printf "turn:%s:%v?transport=udp" $p.turn.hostname $p.turn.publicUdpPort) (printf "turns:%s:%v?transport=tcp" $p.turn.hostname $p.turn.publicTlsPort)) }}
+{{- $_ := set $config "turn_urls" (list (printf "turns:%s:%v?transport=tcp" $p.turn.hostname $p.turn.publicTlsPort)) }}
 {{- end }}
 {{- if $anonymous }}
 {{- if $sessions }}
@@ -124,10 +123,10 @@ spec:
             - {name: BUNDLE_SHA256, value: {{ required "script.sha256 is required" $script.sha256 | quote }}}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
-                secretKeyRef: {name: {{ $script.secretName }}, key: AWS_ACCESS_KEY_ID}
+                secretKeyRef: {name: {{ $script.secretName }}, key: {{ $script.accessKeyKey | default "AWS_ACCESS_KEY_ID" }}}
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
-                secretKeyRef: {name: {{ $script.secretName }}, key: AWS_SECRET_ACCESS_KEY}
+                secretKeyRef: {name: {{ $script.secretName }}, key: {{ $script.secretKeyKey | default "AWS_SECRET_ACCESS_KEY" }}}
             - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
           volumeMounts:
             - {name: scripts, mountPath: /scripts}
@@ -212,5 +211,6 @@ spec:
             pathType: Prefix
             backend:
               service: {name: {{ $name }}, port: {name: http}}
+{{- end }}
 {{- end }}
 {{- end }}

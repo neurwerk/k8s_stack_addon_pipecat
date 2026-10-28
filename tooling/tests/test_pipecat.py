@@ -66,7 +66,11 @@ PRODUCT: dict[str, Any] = {
     "enabled": True,
     "secretSync": {"enabled": True},
     "oidc": {"enabled": True},
-    "turn": {"enabled": True},
+    "turn": {
+        "enabled": True,
+        "peerAddressRanges": ["10.42.0.1-10.42.0.254"],
+        "nodeSelector": {"kubernetes.io/hostname": "example-turn-node"},
+    },
     "machineIdentityApprovals": {
         "voice-bot": {
             "clientId": "pipecat-bot-voice-bot",
@@ -113,6 +117,7 @@ def test_bot_ids_cannot_escape_exact_paths(identity: str) -> None:
         {"urlSlug": "protected-bot"},
         {"urlSlug": "assets"},
         {"anonymous": "true"},
+        {"enabled": "false"},
         {"sessionsEnabled": "true"},
         {"gatewayPermissions": ["llm:invoke", "model:other:invoke"]},
         {"gatewayPermissions": ["llm:invoke", "model:example-model:invoke", "admin"]},
@@ -192,19 +197,28 @@ def test_external_secrets_do_not_require_managed_credentials() -> None:
     assert not expanded.records and not expanded.deliveries and not expanded.readers
 
 
-def test_anonymous_bots_can_offer_optional_oidc_login() -> None:
+@pytest.mark.parametrize("anonymous", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_all_bots_require_oidc_even_when_disabled(anonymous: bool, enabled: bool) -> None:
     product: dict[str, Any] = {
         "enabled": True,
         "secretSync": {"enabled": True},
         "oidc": {"enabled": True},
-        "bots": [{"id": "public-bot", "anonymous": True}],
+        "bots": [{"id": "public-bot", "anonymous": anonymous, "enabled": enabled}],
     }
     selected = select_pipecat(product)
     assert selected.oidc and not selected.bots[0].gateway
-    product["bots"] = [{"id": "protected-bot", "anonymous": False}]
     product["oidc"] = {"enabled": False}
     with pytest.raises(SelectionError, match="require OIDC"):
         select_pipecat(product)
+
+
+def test_disabled_bots_keep_identity_and_credential_setup_ownership() -> None:
+    product = deepcopy(PRODUCT)
+    for bot in product["bots"]:
+        bot["enabled"] = False
+    assert select_pipecat(product) == select_pipecat(PRODUCT)
+    validate_selection(load_manifest(ROOT / "release/manifest.yaml"), selection(), product)
 
 
 @pytest.mark.parametrize("turn_enabled", [False, True])

@@ -4,17 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipecat-tooling"
-version = "0.1.0"
-description = "Offline Pipecat add-on and product selection validation."
+version = "0.1.1"
+description = "Pipecat app bundle publishing, operations and product selection validation."
 readme = "README.md"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY.md"]
 requires-python = ">=3.12"
-dependencies = ["k8s-stack-tooling==0.15.0"]
+dependencies = ["k8s-stack-tooling==0.15.0", "boto3>=1.42,<2", "ruamel.yaml>=0.18,<0.19"]
 
 [project.scripts]
 pipecat-validate = "pipecat_tooling.cli:main"
+pipecat-apps = "pipecat_tooling.apps:main"
 
 [tool.uv.sources]
 k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.0/k8s_stack_tooling-0.15.0-py3-none-any.whl"}

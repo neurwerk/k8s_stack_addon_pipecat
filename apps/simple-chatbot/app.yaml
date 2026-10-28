@@ -1,0 +1,5 @@
+id: simple-chatbot
+runtimeVersion: "0.1.0"
+files:
+  - bot.py
+  - LICENSE.txt

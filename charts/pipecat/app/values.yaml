@@ -12,16 +12,22 @@ pipecat:
     secretName: pipecat-oidc-secret
     secretKey: clientSecret
     gatewayPermissions: []
+  # Per bot: enabled defaults to true. false removes only its runtime resources;
+  # keep its entry to retain credential delivery, storage and identity settings.
+  # gatewayBaseUrl selects the approved binding API base (including /v1).
+  # script.accessKeyKey/secretKeyKey default to AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
+  # For Rook's reader Secret use AccessKey/SecretKey directly; no credential copy.
   bots: []
   turn:
     enabled: false
     hostname: ""
     secretName: pipecat-turn-secret
-    publicUdpPort: 3478
     publicTlsPort: 443
+    relayMinPort: 31000
+    relayMaxPort: 31015
   resources:
     requests: {cpu: 500m, memory: 768Mi}
     limits: {cpu: "2", memory: 2Gi}
-  # HTTPS/speech/S3/TURN destinations, explicitly selected by the client.
+  # HTTPS/speech/S3 destinations, explicitly selected by the client.
   # Use ipBlock/namespaceSelector/podSelector peers and port/protocol entries.
   egress: []

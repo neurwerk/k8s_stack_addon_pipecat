@@ -64,4 +64,7 @@ jobs:
           platforms: linux/amd64
           tags: neurwerk-pipecat-tooling:local
       - name: Verify independent offline tooling artifact
-        run: docker run --rm --network none --read-only neurwerk-pipecat-tooling:local pipecat-validate --help
+        run: |
+          docker run --rm --network none --read-only neurwerk-pipecat-tooling:local pipecat-validate --help
+          docker run --rm --network none --read-only neurwerk-pipecat-tooling:local git --version
+          docker run --rm --network none --read-only neurwerk-pipecat-tooling:local kubectl version --client

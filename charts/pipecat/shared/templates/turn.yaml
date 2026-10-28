@@ -1,8 +1,23 @@
 {{- if and .Values.pipecat.enabled .Values.pipecat.turn.enabled (not .Values.managedKeysOnly) (not .Values.identityOnly) }}
 {{- $t := .Values.pipecat.turn }}
 {{- $host := required "turn.hostname is required" $t.hostname }}
+{{- if empty $t.nodeSelector }}{{ fail "turn.nodeSelector must pin the relay to the node receiving TLS forwarding" }}{{ end }}
+{{- if empty $t.peerAddressRanges }}{{ fail "turn.peerAddressRanges must explicitly allow the bot Pod IPv4 ranges" }}{{ end }}
+{{- range $t.peerAddressRanges }}
+{{- $bounds := list }}
+{{- range (splitList "-" .) }}
+{{- $address := int64 0 }}
+{{- range (splitList "." .) }}
+{{- if gt (int .) 255 }}{{ fail "TURN peer ranges require valid IPv4 addresses" }}{{ end }}
+{{- $address = add (mul $address 256) (int .) }}
+{{- end }}
+{{- $bounds = append $bounds $address }}
+{{- end }}
+{{- $start := index $bounds 0 }}
+{{- $end := index $bounds 1 }}
+{{- if or (gt $start $end) (eq $start (int64 0)) (and (le $start (int64 2147483647)) (ge $end (int64 2130706432))) }}{{ fail "TURN peer ranges must be ordered and must not include world, unspecified or loopback addresses" }}{{ end }}
+{{- end }}
 {{- if or (gt (int $t.relayMinPort) (int $t.relayMaxPort)) (gt (sub (int $t.relayMaxPort) (int $t.relayMinPort)) 63) }}{{ fail "TURN relay range must contain 1-64 ports" }}{{ end }}
-{{- if or (and (ge (int $t.udpNodePort) (int $t.relayMinPort)) (le (int $t.udpNodePort) (int $t.relayMaxPort))) (and (ge (int $t.tlsNodePort) (int $t.relayMinPort)) (le (int $t.tlsNodePort) (int $t.relayMaxPort))) }}{{ fail "TURN listener and relay NodePorts must not overlap" }}{{ end }}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -25,32 +40,28 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   turnserver.conf: |
-    listening-port=3478
     tls-listening-port=5349
     min-port={{ $t.relayMinPort }}
     max-port={{ $t.relayMaxPort }}
     realm={{ $host }}
     server-name={{ $host }}
-    {{- if $t.advertisedAddress }}
-    external-ip={{ $t.advertisedAddress }}
-    {{- end }}
     use-auth-secret
     fingerprint
     cert=/tls/tls.crt
     pkey=/tls/tls.key
+    no-udp
+    no-tcp
     no-dtls
+    no-tlsv1
+    no-tlsv1_1
     no-cli
     no-tcp-relay
     no-multicast-peers
-    denied-peer-ip=0.0.0.0-0.255.255.255
-    denied-peer-ip=10.0.0.0-10.255.255.255
-    denied-peer-ip=127.0.0.0-127.255.255.255
-    denied-peer-ip=169.254.0.0-169.254.255.255
-    denied-peer-ip=172.16.0.0-172.31.255.255
-    denied-peer-ip=192.168.0.0-192.168.255.255
-    denied-peer-ip=::1
-    denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
-    denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+    denied-peer-ip=0.0.0.0-255.255.255.255
+    denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+    {{- range $t.peerAddressRanges }}
+    allowed-peer-ip={{ . }}
+    {{- end }}
     user-quota=4
     total-quota=64
     max-bps=1000000
@@ -67,6 +78,8 @@ kind: Deployment
 metadata:
   name: pipecat-turn
   namespace: {{ .Release.Namespace }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ printf "pipecat-turn-tls,%s" $t.secretName | quote }}
 spec:
   replicas: 1
   strategy: {type: Recreate}
@@ -90,6 +103,10 @@ spec:
         - name: configure
           image: {{ required "Publish and verify pipecat.image before enabling managed TURN" .Values.pipecat.image | quote }}
           command: [pipecat-turn-config]
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -134,11 +151,7 @@ spec:
   externalTrafficPolicy: Local
   selector: {app.kubernetes.io/name: pipecat-turn}
   ports:
-    - {name: stun-udp, protocol: UDP, port: 3478, targetPort: 3478, nodePort: {{ $t.udpNodePort }}}
     - {name: turn-tls, protocol: TCP, port: 5349, targetPort: 5349, nodePort: {{ $t.tlsNodePort }}}
-    {{- range $port := untilStep (int $t.relayMinPort) (int (add $t.relayMaxPort 1)) 1 }}
-    - {name: relay-{{ $port }}, protocol: UDP, port: {{ $port }}, targetPort: {{ $port }}, nodePort: {{ $port }}}
-    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -151,13 +164,14 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress:
     - ports:
-        - {protocol: UDP, port: 3478}
         - {protocol: TCP, port: 5349}
-        - {protocol: UDP, port: {{ $t.relayMinPort }}, endPort: {{ $t.relayMaxPort }}}
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: pipecat, app.kubernetes.io/component: bot}
+      ports: [{protocol: UDP, port: {{ $t.relayMinPort }}, endPort: {{ $t.relayMaxPort }}}]
   egress:
     - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except: [0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4]
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: pipecat, app.kubernetes.io/component: bot}
       ports: [{protocol: UDP, port: 1024, endPort: 65535}]
 {{- end }}

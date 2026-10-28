@@ -208,6 +208,7 @@ class GatewayLLM(FrameProcessor):
             async with self.http.stream(
                 "POST",
                 self.settings.gateway_url,
+                follow_redirects=False,
                 headers={"X-Neurwerk-Authorization": "Bearer " + self.credential},
                 json={
                     "model": self.settings.model_id,

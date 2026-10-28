@@ -26,7 +26,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from neurwerk_pipecat import __version__
 from neurwerk_pipecat.auth import Auth
-from neurwerk_pipecat.bundle import extract
+from neurwerk_pipecat.bundle import extract, load_script
 from neurwerk_pipecat.config import Settings
 from neurwerk_pipecat.notices import MARKER, NoticeSplitter, SpeechControlFilter
 from neurwerk_pipecat.server import create_app
@@ -142,6 +142,29 @@ class BundleTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         extract(path, root / "out", hashlib.sha256(path.read_bytes()).hexdigest())
                 self.assertFalse((root / "out").exists())
+
+    def test_incompatible_manifest_and_non_async_entrypoint_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for manifest in (
+                None,
+                {"runtimeVersion": "unsupported", "entrypoint": "bot.py"},
+                {"runtimeVersion": __version__, "entrypoint": "../bot.py"},
+            ):
+                with self.subTest(manifest=manifest):
+                    path = self.archive(
+                        root,
+                        [(tarfile.TarInfo("manifest.json"), json.dumps(manifest).encode())],
+                    )
+                    with self.assertRaises(ValueError):
+                        extract(path, root / "out", hashlib.sha256(path.read_bytes()).hexdigest())
+                    self.assertFalse((root / "out").exists())
+            files = self.files()
+            files[1] = (tarfile.TarInfo("bot.py"), b"def run_bot(*args): pass\n")
+            path = self.archive(root, files)
+            extract(path, root / "out", hashlib.sha256(path.read_bytes()).hexdigest())
+            with self.assertRaisesRegex(ValueError, "async run_bot"):
+                load_script(root / "out")
 
 
 class AuthTests(unittest.IsolatedAsyncioTestCase):
@@ -402,6 +425,49 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_configured_api_base_url_and_redirect_credential_boundary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data = settings(Path(temporary) / "unused").model_dump()
+            data.update(
+                gateway_origin="",
+                binding_id="",
+                gateway_base_url="https://gateway.example.com/company-chat/v1/",
+            )
+            config = Settings.model_validate(data)
+            captured = []
+
+            def redirect(request):
+                captured.append(request)
+                return httpx.Response(
+                    307, headers={"location": "https://provider.example.com/chat/completions"}
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(redirect), follow_redirects=True
+            ) as http:
+                llm = GatewayLLM(config, http, "delegated-user-token", lambda _: None)
+                llm.push_frame = AsyncMock()
+                await llm.process_frame(LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM)
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(
+                str(captured[0].url),
+                "https://gateway.example.com/company-chat/v1/chat/completions",
+            )
+            self.assertEqual(
+                captured[0].headers["X-Neurwerk-Authorization"], "Bearer delegated-user-token"
+            )
+            self.assertNotIn("Authorization", captured[0].headers)
+            self.assertFalse(llm.is_usable)
+            for base in (
+                "http://gateway.example.com/company-chat/v1",
+                "https://user:password@gateway.example.com/company-chat/v1",
+                "https://gateway.example.com/v1",
+                "https://gateway.example.com/company-chat/v1?key=secret",
+                "https://gateway.example.com/company-chat/v1#fragment",
+            ):
+                with self.subTest(base=base), self.assertRaises(ValueError):
+                    Settings.model_validate({**data, "gateway_base_url": base})
+
     async def test_binding_header_clean_history_and_no_privileged_retry(self):
         with tempfile.TemporaryDirectory() as temporary:
             key = Path(temporary) / "key"
