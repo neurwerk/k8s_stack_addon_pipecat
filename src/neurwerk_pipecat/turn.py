@@ -1,21 +1,8 @@
-"""coturn REST credentials and init-only secret configuration assembly."""
+"""Init-only coturn Secret configuration assembly."""
 
-import base64
-import hashlib
-import hmac
 import os
-import secrets
-import time
 from ipaddress import AddressValueError, IPv4Address
 from pathlib import Path
-
-
-def temporary_credentials(secret: str, lifetime: int, label: str) -> dict[str, str]:
-    username = f"{int(time.time()) + lifetime}:{label}:{secrets.token_hex(8)}"
-    credential = base64.b64encode(
-        hmac.new(secret.encode(), username.encode(), hashlib.sha1).digest()
-    ).decode()
-    return {"username": username, "credential": credential}
 
 
 def main() -> None:

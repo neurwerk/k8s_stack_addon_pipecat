@@ -15,8 +15,8 @@ addon-check:
 	$(TOOLING) addon-check "$(CURDIR)" --base "$(BASE)"
 
 lint:
-	uv run --frozen ruff check src tests
-	uv run --frozen ruff format --check src tests
+	uv run --frozen ruff check src tests apps/simple-chatbot
+	uv run --frozen ruff format --check src tests apps/simple-chatbot
 	@for chart in $(CHARTS); do helm lint --strict "$$chart"; helm lint --strict "$$chart" --namespace pipecat -f validation/values.yaml; done
 
 schema:
@@ -28,15 +28,18 @@ compose:
 
 static:
 	uv run --frozen mypy
-	cd frontend && npm run check
+	cd apps/simple-chatbot && ../../.venv/bin/mypy
+	cd apps/simple-chatbot/frontend && npm run check
 
 build:
 	uv build --no-sources
-	cd frontend && npm run build
+	$(MAKE) -C apps/simple-chatbot build dependencies BASELINE_PROJECT="$(CURDIR)"
+	$(TOOLING) pipecat-apps validate --apps-dir apps --app simple-chatbot
 
 test:
 	@test -n "$(BASE)" || { echo 'Set BASE to the explicit Base candidate checkout'; exit 1; }
-	BASE="$(BASE)" uv run --frozen python -m unittest discover -s tests -v
+	BASE="$(BASE)" PYTHONPATH="$(CURDIR)/apps/simple-chatbot" uv run --frozen python -m unittest discover -s tests -v
+	PYTHONPATH="$(CURDIR)/apps/simple-chatbot" uv run --frozen python -m unittest discover -s apps/simple-chatbot/tests -v
 	uv run --frozen python -m unittest discover -s validation -p test_charts.py -v
 
 image-build:

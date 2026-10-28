@@ -1,9 +1,7 @@
-"""Init-container loader for explicitly trusted private Python scripts, not a sandbox."""
+"""Checksum-verified loader for explicitly trusted complete apps, not a sandbox."""
 
 import gzip
 import hashlib
-import importlib.util
-import inspect
 import json
 import os
 import re
@@ -91,8 +89,14 @@ def extract_tar(archive: Path, target: Path) -> None:
 
 def validate_manifest(target: Path) -> Path:
     manifest = json.loads((target / "manifest.json").read_text())
-    if not isinstance(manifest, dict) or set(manifest) != {"runtimeVersion", "entrypoint"}:
-        raise ValueError("Invalid script manifest fields")
+    if not isinstance(manifest, dict) or set(manifest) != {
+        "id",
+        "runtimeVersion",
+        "entrypoint",
+        "requirements",
+        "files",
+    }:
+        raise ValueError("Invalid app manifest fields")
     if manifest["runtimeVersion"] != __version__:
         raise ValueError("Incompatible script runtime")
     entrypoint = manifest["entrypoint"]
@@ -101,18 +105,39 @@ def validate_manifest(target: Path) -> Path:
     path = target / entrypoint
     if not path.is_file() or path.is_symlink():
         raise ValueError("Missing script entrypoint")
+    if not isinstance(manifest["id"], str) or not re.fullmatch(
+        r"[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?", manifest["id"]
+    ):
+        raise ValueError("Invalid app ID")
+    files = manifest["files"]
+    actual = {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()}
+    if (
+        not isinstance(files, list)
+        or any(not isinstance(name, str) for name in files)
+        or len(set(files)) != len(files)
+        or "manifest.json" in files
+        or actual != set(files) | {"manifest.json"}
+    ):
+        raise ValueError("Manifest files do not match bundle")
+    requirements = manifest["requirements"]
+    if requirements is not None:
+        if not isinstance(requirements, str) or requirements not in files:
+            raise ValueError("Missing dependency lock")
+        validate_requirements((target / requirements).read_text())
     return path
 
 
-def load_script(target: Path):
-    path = validate_manifest(target)
-    spec = importlib.util.spec_from_file_location("trusted_bot", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    if not inspect.iscoroutinefunction(getattr(module, "run_bot", None)):
-        raise ValueError("Script must export async run_bot")
-    return module.run_bot
+def validate_requirements(text: str) -> None:
+    for line in text.replace("\\\n", " ").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*"
+            r"(?:\s+--hash=sha256:[a-f0-9]{64})+",
+            line,
+        ):
+            raise ValueError("Dependencies require exact versions and SHA-256 hashes")
 
 
 def load_bundle() -> None:

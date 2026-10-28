@@ -104,13 +104,25 @@ def safe_file(root: Path, name: str) -> bytes:
         data = stream.read(MAX_EXPANDED + 1)
     if len(data) > MAX_EXPANDED:
         raise AppError("Bundle file is too large")
+    # Mask only AST-confirmed value-less annotations for the YAML-value heuristic.
+    # Assignments and the raw embedded-key/string checks remain fully scanned.
+    scanned = data
+    if path.suffix == ".py":
+        lines = data.splitlines(keepends=True)
+        for node in ast.walk(ast.parse(data, filename=name)):
+            if isinstance(node, ast.AnnAssign) and node.value is None:
+                for index in range(node.lineno - 1, node.end_lineno or node.lineno):
+                    lines[index] = b"\n"
+        scanned = b"".join(lines)
     # Fail closed for common accidentally embedded credentials, not a secret scanner.
     if re.search(
         rb"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[A-Z0-9]{16}\b|"
         rb"(?i:aws_secret_access_key|api_key|password|client_secret)['\"]?\s*[:=]\s*"
-        rb"['\"][^'\"\r\n]+['\"]|"
-        rb"(?im:^\s*(?:aws_secret_access_key|api_key|password|client_secret)\s*:\s*\S+)",
+        rb"['\"][^'\"\r\n]+['\"]",
         data,
+    ) or re.search(
+        rb"(?im:^\s*(?:aws_secret_access_key|api_key|password|client_secret)\s*:\s*\S+)",
+        scanned,
     ):
         raise AppError("Possible embedded credential in bundle")
     return data
@@ -126,8 +138,14 @@ class Bundle:
 def package(root: Path, app: str) -> Bundle:
     directory = app_path(root, app)
     config = YAML(typ="safe").load(safe_file(directory, "app.yaml"))
-    if not isinstance(config, dict) or set(config) != {"id", "runtimeVersion", "files"}:
-        raise AppError("app.yaml requires exactly id, runtimeVersion and files")
+    if not isinstance(config, dict) or set(config) != {
+        "id",
+        "runtimeVersion",
+        "files",
+        "entrypoint",
+        "requirements",
+    }:
+        raise AppError("app.yaml requires id, runtimeVersion, files, entrypoint and requirements")
     version = config["runtimeVersion"]
     files = config["files"]
     if (
@@ -142,10 +160,21 @@ def package(root: Path, app: str) -> Bundle:
         or len(files) >= MAX_FILES
         or any(not isinstance(name, str) for name in files)
         or len(set(files)) != len(files)
-        or "bot.py" not in files
         or any(name in {"app.yaml", "manifest.json"} for name in files)
     ):
-        raise AppError("files must explicitly list bot.py and supporting files, without duplicates")
+        raise AppError("files must explicitly list all app artifacts, without duplicates")
+    entrypoint = config["entrypoint"]
+    requirements = config["requirements"]
+    if (
+        not isinstance(entrypoint, str)
+        or not re.fullmatch(r"[a-z][a-z0-9_]*\.py", entrypoint)
+        or entrypoint not in files
+    ):
+        raise AppError("entrypoint must name an allowlisted root Python server file")
+    if requirements is not None and (
+        not isinstance(requirements, str) or requirements not in files
+    ):
+        raise AppError("requirements must name an allowlisted dependency lock or be null")
     payload = {}
     total = 0
     for name in files:
@@ -154,14 +183,19 @@ def package(root: Path, app: str) -> Bundle:
         if total > MAX_EXPANDED:
             raise AppError("Expanded bundle limit exceeded")
         payload[name] = content
-    tree = ast.parse(payload["bot.py"], filename="bot.py")
-    if not any(
-        isinstance(node, ast.AsyncFunctionDef) and node.name == "run_bot" for node in tree.body
-    ):
-        raise AppError("bot.py must export async run_bot")
-    payload["manifest.json"] = json.dumps(
-        {"runtimeVersion": version, "entrypoint": "bot.py"}, sort_keys=True, separators=(",", ":")
-    ).encode()
+    compile(payload[entrypoint], entrypoint, "exec")
+    if requirements is not None:
+        for line in payload[requirements].decode().replace("\\\n", " ").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*"
+                r"(?:\s+--hash=sha256:[a-f0-9]{64})+",
+                line,
+            ):
+                raise AppError("Dependencies require exact versions and SHA-256 hashes")
+    payload["manifest.json"] = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
     if sum(map(len, payload.values())) > MAX_EXPANDED:
         raise AppError("Expanded bundle limit exceeded")
     output = io.BytesIO()

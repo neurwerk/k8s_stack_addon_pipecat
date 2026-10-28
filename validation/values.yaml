@@ -18,11 +18,25 @@ pipecat:
       urlSlug: simple_chatbot
       sessionsEnabled: true
       anonymous: false
+      script:
+        enabled: true
+        endpoint: https://s3.example.com
+        bucket: voice-apps
+        key: pipecat/example/placeholder.tar.gz
+        sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        secretName: app-bundle-reader
       bindingId: voice
       modelId: example-model
       stt: {baseUrl: https://speech.example.com/v1, model: whisper-1}
       tts: {baseUrl: https://speech.example.com/v1, model: tts-1, voice: alloy}
     - id: public-example
+      script:
+        enabled: true
+        endpoint: https://s3.example.com
+        bucket: voice-apps
+        key: pipecat/public-example/placeholder.tar.gz
+        sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        secretName: app-bundle-reader
       sessionsEnabled: true
       anonymous: true
       gatewayPermissions: ["llm:invoke", "model:example-model:invoke"]
@@ -31,5 +45,12 @@ pipecat:
       stt: {baseUrl: https://speech.example.com/v1, model: whisper-1}
       tts: {baseUrl: https://speech.example.com/v1, model: tts-1, voice: alloy}
     - id: not-ready
+      script:
+        enabled: true
+        endpoint: https://s3.example.com
+        bucket: voice-apps
+        key: pipecat/not-ready/placeholder.tar.gz
+        sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        secretName: app-bundle-reader
       anonymous: false
       sessionsEnabled: false

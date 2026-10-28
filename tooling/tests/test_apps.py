@@ -17,7 +17,10 @@ def source(tmp_path: Path) -> Path:
     root = tmp_path / "apps"
     directory = root / "assistant"
     directory.mkdir(parents=True)
-    (directory / "app.yaml").write_text("id: assistant\nruntimeVersion: 0.1.0\nfiles: [bot.py]\n")
+    (directory / "app.yaml").write_text(
+        "id: assistant\nruntimeVersion: 0.2.0\nentrypoint: bot.py\nrequirements: null\n"
+        "files: [bot.py]\n"
+    )
     (directory / "bot.py").write_text("async def run_bot(*args, **kwargs):\n    pass\n")
     return root
 
@@ -68,7 +71,73 @@ def test_deterministic_allowlist_and_exact_runtime_manifest(source: Path):
         assert archive.getnames() == ["bot.py", "manifest.json"]
         manifest = archive.extractfile("manifest.json")
         assert manifest is not None
-        assert json.load(manifest) == {"runtimeVersion": "0.1.0", "entrypoint": "bot.py"}
+        assert json.load(manifest) == {
+            "id": "assistant",
+            "runtimeVersion": "0.2.0",
+            "entrypoint": "bot.py",
+            "requirements": None,
+            "files": ["bot.py"],
+        }
+
+
+def test_complete_server_and_prebuilt_assets_are_packaged_without_pipeline_hook(source: Path):
+    directory = source / "assistant"
+    (directory / "main.py").write_text("print('app-owned server')\n")
+    (directory / "frontend/dist").mkdir(parents=True)
+    (directory / "frontend/dist/index.html").write_text("<main>compiled app UI</main>")
+    (directory / "app.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "assistant",
+                "runtimeVersion": "0.2.0",
+                "entrypoint": "main.py",
+                "requirements": None,
+                "files": ["main.py", "frontend/dist/index.html"],
+            }
+        )
+    )
+    bundle = apps.package(source, "assistant")
+    with tarfile.open(fileobj=io.BytesIO(bundle.data), mode="r:gz") as archive:
+        asset = archive.extractfile("frontend/dist/index.html")
+        assert asset is not None
+        assert asset.read() == b"<main>compiled app UI</main>"
+        assert "bot.py" not in archive.getnames()
+
+
+@pytest.mark.parametrize("lock", ["httpx", "httpx>=0.28", "httpx==0.28.1", "-r other.lock"])
+def test_unpinned_or_indirect_startup_dependencies_are_rejected(source: Path, lock: str):
+    directory = source / "assistant"
+    config = yaml.safe_load((directory / "app.yaml").read_text())
+    config["requirements"] = "requirements.lock"
+    config["files"].append("requirements.lock")
+    (directory / "app.yaml").write_text(yaml.safe_dump(config))
+    (directory / "requirements.lock").write_text(lock)
+    with pytest.raises(apps.AppError, match="exact versions"):
+        apps.package(source, "assistant")
+
+
+def test_python_secret_reference_annotation_is_not_a_yaml_secret(source: Path):
+    directory = source / "assistant"
+    (directory / "auth.py").write_text("class OIDC:\n    client_secret: SecretRef\n")
+    assert apps.safe_file(directory, "auth.py") == b"class OIDC:\n    client_secret: SecretRef\n"
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("config.py", 'client_secret = "embedded-value"\n'),
+        ("config.py", 'password: str = "embedded-value"\n'),
+        ("config.py", 'api_key = "embedded-value"\n'),
+        ("config.yaml", "client_secret: embedded-value\n"),
+        ("config.yaml", "password: embedded-value\n"),
+        ("config.yaml", "api_key: embedded-value\n"),
+    ],
+)
+def test_real_python_and_yaml_credential_values_still_rejected(source, name, content):
+    directory = source / "assistant"
+    (directory / name).write_text(content)
+    with pytest.raises(apps.AppError, match="credential"):
+        apps.safe_file(directory, name)
 
 
 @pytest.mark.parametrize(
@@ -77,7 +146,7 @@ def test_deterministic_allowlist_and_exact_runtime_manifest(source: Path):
 def test_unsafe_allowlist_rejected(source: Path, name: str):
     config = source / "assistant/app.yaml"
     config.write_text(
-        yaml.safe_dump({"id": "assistant", "runtimeVersion": "0.1.0", "files": ["bot.py", name]})
+        yaml.safe_dump({"id": "assistant", "runtimeVersion": "0.2.0", "files": ["bot.py", name]})
     )
     with pytest.raises(apps.AppError):
         apps.package(source, "assistant")

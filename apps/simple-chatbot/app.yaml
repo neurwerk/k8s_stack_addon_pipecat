@@ -1,5 +1,37 @@
 id: simple-chatbot
-runtimeVersion: "0.1.0"
+runtimeVersion: 0.2.0
+entrypoint: server.py
+requirements: requirements.lock
 files:
-  - bot.py
-  - LICENSE.txt
+- LICENSE.txt
+- server.py
+- requirements.lock
+- UPSTREAM-LICENSE
+- PIPECAT-UI-LICENSE
+- SHADCN-LICENSE
+- upstream.json
+- simple_chatbot/__init__.py
+- simple_chatbot/auth.py
+- simple_chatbot/config.py
+- simple_chatbot/bot.py
+- simple_chatbot/notices.py
+- simple_chatbot/server.py
+- simple_chatbot/services.py
+- simple_chatbot/turn.py
+- simple_chatbot/webrtc.py
+- simple_chatbot/websocket.py
+- frontend/dist/index.html
+- frontend/dist/pipecat.svg
+- frontend/dist/assets/app.js
+- frontend/dist/assets/index.module.js
+- frontend/dist/assets/index.css
+- wheels/annotated_doc-0.0.5-py3-none-any.whl
+- wheels/certifi-2026.10.23-py3-none-any.whl
+- wheels/click-8.5.0-py3-none-any.whl
+- wheels/fastapi-0.162.0-py3-none-any.whl
+- wheels/httpcore-1.0.9-py3-none-any.whl
+- wheels/httpx-0.28.1-py3-none-any.whl
+- wheels/opentelemetry_api-1.45.1-py3-none-any.whl
+- wheels/pyjwt-2.15.1-py3-none-any.whl
+- wheels/starlette-1.10.0-py3-none-any.whl
+- wheels/uvicorn-0.54.0-py3-none-any.whl

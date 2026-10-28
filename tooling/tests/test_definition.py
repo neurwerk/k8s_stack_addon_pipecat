@@ -54,7 +54,8 @@ def test_shared_parser_and_installable_publication_boundary(capsys):
     assert main([str(ROOT), "--list-packages"]) == 0
     assert "releases/pipecat/secret-sync" in capsys.readouterr().out
     check(ROOT)
-    check(ROOT, installable=True)
+    with pytest.raises(ContractError, match="staged"):
+        check(ROOT, installable=True)
 
 
 def test_empty_catalog_has_no_credentials_or_disabled_waits():
@@ -226,7 +227,7 @@ def test_all_effective_image_consumers_and_machine_approvals(media_enabled):
     values["pipecat"]["image"] = next(a.image for a in addon.spec.artifacts if a.id == "runtime")
     # Synthetic offline-only script reference; this test never downloads an archive.
     values["pipecat"]["bots"][0]["script"] = {
-        "enabled": media_enabled,
+        "enabled": True,
         "endpoint": "https://storage.example.com",
         "bucket": "example",
         "key": "fixture.tar.gz",
@@ -312,10 +313,7 @@ def test_all_effective_image_consumers_and_machine_approvals(media_enabled):
     }
     workloads = result.rendered[("app", "pipecat", "pipecat")]
     deployments = [item for item in workloads if item["kind"] == "Deployment"]
-    assert (
-        any(d["spec"]["template"]["spec"].get("initContainers") for d in deployments)
-        == media_enabled
-    )
+    assert all(d["spec"]["template"]["spec"].get("initContainers") for d in deployments)
     shared = result.rendered[("secret-sync", "pipecat", "pipecat-shared")]
     assert any(item["kind"] == "Deployment" for item in shared) == media_enabled
 

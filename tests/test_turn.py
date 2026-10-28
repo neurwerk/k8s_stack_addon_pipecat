@@ -1,13 +1,11 @@
 """Managed TURN config and browser-only relay boundaries, without network access."""
 
-import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from neurwerk_pipecat.config import SecretRef, Settings, browser_ice, server_ice
 from neurwerk_pipecat.turn import main
 
 
@@ -51,36 +49,3 @@ class TurnTests(unittest.TestCase):
             self.assertIn("no-tcp", lines)
             self.assertFalse(any(line.startswith("external-ip=") for line in lines))
             self.assertEqual(target.stat().st_mode & 0o777, 0o440)
-
-    def test_managed_turn_is_browser_only_and_explicit_server_ice_is_preserved(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            secret = root / "turn"
-            secret.write_text("a" * 64)
-            config = Settings(
-                bot_id="example",
-                url_slug="example",
-                public_origin="https://voice.example.com",
-                anonymous=True,
-                turn_secret=SecretRef(file=str(secret)),
-                turn_urls=["turns:turn.example.com:443?transport=tcp"],
-            )
-            self.assertEqual(server_ice(config), [])
-            browser = browser_ice(config)
-            self.assertEqual(len(browser), 1)
-            self.assertEqual(browser[0]["urls"], config.turn_urls)
-            self.assertIn(":example:", browser[0]["username"])
-            self.assertTrue(browser[0]["credential"])
-            explicit = [{"urls": "turns:explicit.example.com:443?transport=tcp"}]
-            config.ice_servers = explicit
-            self.assertEqual(server_ice(config), explicit)
-            ice_file = root / "ice.json"
-            ice_file.write_text(json.dumps(explicit))
-            config.server_ice_secret = SecretRef(file=str(ice_file))
-            config.browser_ice_secret = SecretRef(file=str(ice_file))
-            self.assertEqual(server_ice(config), explicit)
-            self.assertEqual(browser_ice(config)[0], explicit[0])
-            self.assertEqual(browser_ice(config)[1]["urls"], config.turn_urls)
-            secret.unlink()
-            # Server ICE does not even read the managed browser relay credential.
-            self.assertEqual(server_ice(config), explicit)

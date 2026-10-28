@@ -6,6 +6,7 @@ services:
     environment:
       PIPECAT_CONFIG: /config/config.json
     volumes:
+      - ${PIPECAT_LOCAL_APP:-./local/app}:/scripts/bundle:ro
       - ${PIPECAT_LOCAL_CONFIG:-./local/config.json}:/config/config.json:ro
       - ${PIPECAT_LOCAL_CREDENTIALS:-./local/credentials}:/credentials:ro
     read_only: true
