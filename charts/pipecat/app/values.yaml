@@ -22,11 +22,12 @@ pipecat:
     enabled: false
     hostname: ""
     secretName: pipecat-turn-secret
-    publicUdpPort: 3478
     publicTlsPort: 443
+    relayMinPort: 31000
+    relayMaxPort: 31015
   resources:
     requests: {cpu: 500m, memory: 768Mi}
     limits: {cpu: "2", memory: 2Gi}
-  # HTTPS/speech/S3/TURN destinations, explicitly selected by the client.
+  # HTTPS/speech/S3 destinations, explicitly selected by the client.
   # Use ipBlock/namespaceSelector/podSelector peers and port/protocol entries.
   egress: []

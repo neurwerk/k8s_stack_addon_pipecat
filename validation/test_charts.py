@@ -136,3 +136,115 @@ class DeploymentBehaviorTests(unittest.TestCase):
         self.values["pipecat"]["oidc"]["enabled"] = False
         for chart in ("app", "oidc", "shared"):
             self.render(chart, error="All bots require OIDC integration")
+
+    def test_turn_exposes_only_tls_and_supplies_private_relay_address(self):
+        shared = self.render("shared")
+        service = next(item for item in shared if item["kind"] == "Service")
+        self.assertEqual(service["spec"]["type"], "NodePort")
+        self.assertEqual(service["spec"]["externalTrafficPolicy"], "Local")
+        self.assertEqual(
+            service["spec"]["ports"],
+            [
+                {
+                    "name": "turn-tls",
+                    "protocol": "TCP",
+                    "port": 5349,
+                    "targetPort": 5349,
+                    "nodePort": 30549,
+                }
+            ],
+        )
+        deployment = next(item for item in shared if item["kind"] == "Deployment")
+        pod = deployment["spec"]["template"]["spec"]
+        self.assertEqual(pod["nodeSelector"], {"kubernetes.io/hostname": "relay-example"})
+        self.assertEqual(
+            pod["initContainers"][0]["env"],
+            [{"name": "POD_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}}}],
+        )
+        config = next(item for item in shared if item["kind"] == "ConfigMap")
+        lines = config["data"]["turnserver.conf"].splitlines()
+        for directive in (
+            "no-udp",
+            "no-tcp",
+            "no-dtls",
+            "no-tcp-relay",
+            "denied-peer-ip=0.0.0.0-255.255.255.255",
+            "denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "allowed-peer-ip=10.42.0.1-10.42.0.254",
+        ):
+            self.assertIn(directive, lines)
+        self.assertNotIn("no-udp-relay", lines)
+        self.assertFalse(any(line.startswith("external-ip=") for line in lines))
+        for item in self.render("app"):
+            if item["kind"] == "ConfigMap":
+                self.assertEqual(
+                    json.loads(item["data"]["config.json"])["turn_urls"],
+                    ["turns:turn.example.com:443?transport=tcp"],
+                )
+
+    def test_private_media_routes_are_scoped_to_same_namespace_bot_and_turn_pods(self):
+        bot_peer = {
+            "podSelector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": "pipecat",
+                    "app.kubernetes.io/component": "bot",
+                }
+            }
+        }
+        turn_peer = {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "pipecat-turn"}}}
+        media = {"protocol": "UDP", "port": 1024, "endPort": 65535}
+        relay = {"protocol": "UDP", "port": 31000, "endPort": 31015}
+        turn_policy = next(
+            item for item in self.render("shared") if item["kind"] == "NetworkPolicy"
+        )["spec"]
+        self.assertEqual(
+            turn_policy["ingress"],
+            [
+                {"ports": [{"protocol": "TCP", "port": 5349}]},
+                {"from": [bot_peer], "ports": [relay]},
+            ],
+        )
+        self.assertEqual(turn_policy["egress"], [{"to": [bot_peer], "ports": [media]}])
+        app_egress = {
+            "to": [{"ipBlock": {"cidr": "192.0.2.1/32"}}],
+            "ports": [{"protocol": "TCP", "port": 443}],
+        }
+        self.values["pipecat"]["egress"] = [app_egress]
+
+        def policy():
+            return next(item for item in self.render("app") if item["kind"] == "NetworkPolicy")[
+                "spec"
+            ]
+
+        enabled = policy()
+        self.assertEqual(enabled["ingress"][1:], [{"from": [turn_peer], "ports": [media]}])
+        self.assertEqual(
+            enabled["egress"][1:],
+            [
+                {"to": [turn_peer], "ports": [relay]},
+                app_egress,
+            ],
+        )
+        self.values["pipecat"]["turn"]["enabled"] = False
+        disabled = policy()
+        self.assertEqual(disabled["ingress"], enabled["ingress"][:1])
+        self.assertEqual(disabled["egress"], [enabled["egress"][0], app_egress])
+
+    def test_turn_requires_explicit_valid_peer_ranges_and_a_pinned_node(self):
+        for ranges in (
+            [],
+            ["0.0.0.0-255.255.255.255"],
+            ["127.0.0.1-127.0.0.2"],
+            ["10.0.0.1-192.168.0.1"],
+            ["10.42.0.254-10.42.0.1"],
+        ):
+            with self.subTest(ranges=ranges):
+                self.values["pipecat"]["turn"]["peerAddressRanges"] = ranges
+                self.render(
+                    "shared", error="TURN peer ranges" if ranges else "turn.peerAddressRanges"
+                )
+        self.values["pipecat"]["turn"]["peerAddressRanges"] = ["10.42.0.1-10.42.0.999"]
+        self.render("shared", error="TURN peer ranges require valid IPv4 addresses")
+        self.values["pipecat"]["turn"]["peerAddressRanges"] = ["10.42.0.1-10.42.0.254"]
+        self.values["pipecat"]["turn"]["nodeSelector"] = {}
+        self.render("shared", error="turn.nodeSelector must pin the relay")
