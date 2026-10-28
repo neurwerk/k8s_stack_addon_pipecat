@@ -51,6 +51,7 @@ class Settings(BaseModel):
     anonymous_key: SecretRef | None = None
     oidc: OIDC | None = None
     gateway_origin: str = ""
+    gateway_base_url: str = ""
     binding_id: str = Field(default="", pattern=r"^$|^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
     model_id: str = Field(default="", max_length=200)
     stt: Speech | None = None
@@ -73,7 +74,12 @@ class Settings(BaseModel):
         if self.bot_id in {"turn", "product-values"}:
             raise ValueError("Bot ID is reserved for managed infrastructure")
         if self.sessions_enabled and not all(
-            (self.gateway_origin, self.binding_id, self.model_id, self.stt, self.tts)
+            (
+                self.gateway_base_url or (self.gateway_origin and self.binding_id),
+                self.model_id,
+                self.stt,
+                self.tts,
+            )
         ):
             raise ValueError("Enabled sessions require all gateway and speech settings")
         for value in [self.public_origin] + ([self.gateway_origin] if self.gateway_origin else []):
@@ -82,6 +88,20 @@ class Settings(BaseModel):
                 raise ValueError("Public and gateway origins must use HTTPS without credentials")
             if url.path not in ("", "/") or url.query or url.fragment:
                 raise ValueError("Expected an origin, not an endpoint path")
+        if self.gateway_base_url:
+            url = urlsplit(self.gateway_base_url)
+            path = url.path.rstrip("/")
+            if (
+                url.scheme != "https"
+                or not url.hostname
+                or url.username is not None
+                or url.password is not None
+                or url.query
+                or url.fragment
+                or not path.endswith("/v1")
+                or path == "/v1"
+            ):
+                raise ValueError("Expected a bound gateway HTTPS API base URL")
         for speech in (self.stt, self.tts):
             if speech is None:
                 continue
@@ -108,6 +128,8 @@ class Settings(BaseModel):
 
     @property
     def gateway_url(self) -> str:
+        if self.gateway_base_url:
+            return self.gateway_base_url.rstrip("/") + "/chat/completions"
         return f"{self.gateway_origin.rstrip('/')}/bindings/{self.binding_id}/v1/chat/completions"
 
 

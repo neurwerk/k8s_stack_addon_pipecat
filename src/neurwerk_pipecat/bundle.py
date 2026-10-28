@@ -3,6 +3,7 @@
 import gzip
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -90,7 +91,7 @@ def extract_tar(archive: Path, target: Path) -> None:
 
 def validate_manifest(target: Path) -> Path:
     manifest = json.loads((target / "manifest.json").read_text())
-    if set(manifest) != {"runtimeVersion", "entrypoint"}:
+    if not isinstance(manifest, dict) or set(manifest) != {"runtimeVersion", "entrypoint"}:
         raise ValueError("Invalid script manifest fields")
     if manifest["runtimeVersion"] != __version__:
         raise ValueError("Incompatible script runtime")
@@ -109,7 +110,7 @@ def load_script(target: Path):
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    if not callable(getattr(module, "run_bot", None)):
+    if not inspect.iscoroutinefunction(getattr(module, "run_bot", None)):
         raise ValueError("Script must export async run_bot")
     return module.run_bot
 
