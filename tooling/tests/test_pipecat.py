@@ -68,7 +68,7 @@ PRODUCT: dict[str, Any] = {
     "oidc": {"enabled": True},
     "turn": {
         "enabled": True,
-        "advertisedAddress": "192.0.2.10",
+        "peerAddressRanges": ["10.42.0.1-10.42.0.254"],
         "nodeSelector": {"kubernetes.io/hostname": "example-turn-node"},
     },
     "machineIdentityApprovals": {
