@@ -4,8 +4,8 @@ metadata:
   name: pipecat
 spec:
   version: 0.2.0
-  # Source preparation only: publish and verify the 0.2.0 runtime/tooling, then update pins.
-  status: staged
+  # Runtime and tooling 0.2.0 publication and anonymous linux/amd64 pulls verified.
+  status: ready
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
@@ -55,14 +55,12 @@ spec:
     managed-oidc: false
     managed-turn: false
   artifacts:
-    # Last published pins, not compatible app-bundle artifacts for this staged source.
-    # Keep unavailable until a separate verified artifact-pin change marks it ready.
     - id: tooling
       role: product
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.1.1@sha256:4ac12e87d372dff300498ef60b9279671e5c86bfc5b493a583ae3f619c23cdbe
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.2.0@sha256:4037ce3ea612b85dd0f38024b2f24f0ec8aa61f257a70f8de765b25b9b2a0292
     - id: runtime
       role: native
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.1.0@sha256:0999715219c80b41d96078e761b4afa82f5beba53a46eaa92e64fb129d3b9b70
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.0@sha256:6ae34fe6a12e03715f553d4065e3cf89cb53fcb8202b1ace659d01cf19cb5878
     - id: coturn
       role: native
       image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93
