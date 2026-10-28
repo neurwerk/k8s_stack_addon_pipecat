@@ -154,8 +154,10 @@ def server_ice(settings: Settings) -> list[dict]:
         value = json.loads(settings.server_ice_secret.read())
         if not isinstance(value, list) or len(value) > 8:
             raise ValueError("Invalid server ICE server list")
-        return value + managed_turn(settings)
-    return settings.ice_servers + managed_turn(settings)
+        return value
+    # The browser relay reaches bot host candidates on the private pod network.
+    # Sending the bot through managed TURN would hairpin via the public TLS route.
+    return settings.ice_servers
 
 
 def managed_turn(settings: Settings) -> list[dict]:
