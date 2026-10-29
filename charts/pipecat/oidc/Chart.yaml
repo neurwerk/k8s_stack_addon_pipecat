@@ -1,5 +1,5 @@
 apiVersion: v2
 name: pipecat-oidc
 description: Derive exact bot callbacks for Base's scoped OIDC client
-version: 0.2.1
+version: 1.0.0
 appVersion: 0.1.0

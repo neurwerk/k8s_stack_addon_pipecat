@@ -10,7 +10,7 @@
 {{- if ne $.Values.authKeycloak.agentgatewayClientId "agentgateway" }}{{ fail "Scoped service clients require the canonical agentgateway audience" }}{{ end }}
 {{- if or (ne (len $roles) (len ($roles | uniq))) (not (has "llm:invoke" $roles)) (not (has (printf "model:%s:invoke" $model) $roles)) }}{{ fail "Managed bot roles require unique llm and canonical model invocation grants" }}{{ end }}
 {{- range $roles }}
-{{- if not (or (eq . "llm:invoke") (eq . (printf "model:%s:invoke" $model)) (regexMatch `^provider:[a-z0-9][a-z0-9-]{0,47}:company-use$` .)) }}{{ fail "Managed bots may invoke only their canonical model and explicitly approved providers" }}{{ end }}
+{{- if not (or (eq . "llm:invoke") (eq . (printf "model:%s:invoke" $model)) (regexMatch `^provider:[a-z0-9][a-z0-9-]{0,47}:global-use$` .)) }}{{ fail "Managed bots may invoke only their canonical model and explicitly approved providers" }}{{ end }}
 {{- if not (has . $.Values.authKeycloak.agentgatewayClientRoles) }}{{ fail "Managed bot permission is absent from the approved AgentGateway role catalog" }}{{ end }}
 {{- end }}
 ---

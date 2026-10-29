@@ -78,7 +78,7 @@ PRODUCT: dict[str, Any] = {
             "gatewayPermissions": [
                 "llm:invoke",
                 "model:example-model:invoke",
-                "provider:example:company-use",
+                "provider:example:global-use",
             ],
             "audiences": ["agentgateway"],
         },
@@ -93,7 +93,7 @@ PRODUCT: dict[str, Any] = {
             "gatewayPermissions": [
                 "llm:invoke",
                 "model:example-model:invoke",
-                "provider:example:company-use",
+                "provider:example:global-use",
             ],
             "stt": {"secretRef": {"name": "pipecat-bot-voice-bot", "key": "sttApiKey"}},
         },
@@ -132,6 +132,21 @@ def test_invalid_or_broader_bot_selections_fail_closed(change: dict[str, Any]) -
     product["bots"][0].update(change)
     with pytest.raises(SelectionError, match="Pipecat"):
         select_pipecat(product)
+
+
+@pytest.mark.parametrize("provider_role", [None, "global-use", "company-use"])
+def test_provider_grants_reject_legacy_roles_even_when_approved(provider_role: str | None) -> None:
+    product = deepcopy(PRODUCT)
+    permissions = ["llm:invoke", "model:example-model:invoke"]
+    if provider_role:
+        permissions.append(f"provider:example:{provider_role}")
+    product["bots"][0]["gatewayPermissions"] = list(permissions)
+    product["machineIdentityApprovals"]["voice-bot"]["gatewayPermissions"] = list(permissions)
+    if provider_role == "company-use":
+        with pytest.raises(SelectionError, match="explicit global-use"):
+            select_pipecat(product)
+    else:
+        assert select_pipecat(product).bots[0].gateway
 
 
 def test_selection_matches_chart_refs_and_does_not_import_external_secrets() -> None:
