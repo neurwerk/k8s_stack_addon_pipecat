@@ -15,7 +15,7 @@ from k8s_stack_tooling.gateway_catalog.values import merge_values
 _ID = re.compile(r"[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?")
 _SLUG = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
-_PROVIDER_GRANT = re.compile(r"provider:[a-z0-9][a-z0-9-]{0,47}:company-use")
+_PROVIDER_GRANT = re.compile(r"provider:[a-z0-9][a-z0-9-]{0,47}:global-use")
 _BRIDGE = "auth-keycloak-api-key-bridge"
 _RESERVED_IDS = {"turn", "product-values"}
 
@@ -225,7 +225,7 @@ def _validate_grants(row: dict[str, object]) -> None:
         or not required.issubset(permissions)
         or any(item not in required and not _PROVIDER_GRANT.fullmatch(item) for item in permissions)
     ):
-        raise SelectionError("Pipecat grants must include only invocation and explicit company-use")
+        raise SelectionError("Pipecat grants must include only invocation and explicit global-use")
 
 
 def _managed_ref(value: object, name: str, key: str, default: bool) -> bool:

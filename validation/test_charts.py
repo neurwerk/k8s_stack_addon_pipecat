@@ -139,6 +139,52 @@ class DeploymentBehaviorTests(unittest.TestCase):
         for chart in ("app", "oidc", "shared"):
             self.render(chart, error="All bots require OIDC integration")
 
+    def test_machine_provider_grants_reject_legacy_roles_even_when_approved(self):
+        self.values["machineIdentitiesOnly"] = True
+        for provider_role in (None, "global-use", "company-use"):
+            with self.subTest(provider_role=provider_role):
+                roles = ["llm:invoke", "model:example-model:invoke"]
+                if provider_role:
+                    roles.append(f"provider:example:{provider_role}")
+                self.values["authKeycloak"] = {
+                    "realm": "example",
+                    "adminUser": "admin",
+                    "agentgatewayClientId": "agentgateway",
+                    "agentgatewayClientRoles": list(roles),
+                }
+                product = self.values["pipecat"]
+                product["bots"][1]["gatewayPermissions"] = list(roles)
+                product["machineIdentityApprovals"] = {
+                    "public-example": {
+                        "clientId": "pipecat-bot-public-example",
+                        "realmRoles": [],
+                        "gatewayPermissions": list(roles),
+                        "audiences": ["agentgateway"],
+                    }
+                }
+                if provider_role == "company-use":
+                    self.render(
+                        "oidc",
+                        namespace="auth-keycloak",
+                        error=(
+                            "Managed bots may invoke only their canonical model "
+                            "and explicitly approved providers"
+                        ),
+                    )
+                    continue
+                resources = self.render("oidc", namespace="auth-keycloak")
+                job = next(
+                    item
+                    for item in resources
+                    if item["kind"] == "Job"
+                    and item["metadata"]["name"] == "pipecat-bot-public-example-oidc"
+                )
+                env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+                scope = next(
+                    item["value"] for item in env if item["name"] == "KC_GATEWAY_ROLE_SCOPE"
+                )
+                self.assertEqual(json.loads(scope), roles)
+
     def test_turn_exposes_only_tls_and_supplies_private_relay_address(self):
         shared = self.render("shared")
         service = next(item for item in shared if item["kind"] == "Service")
