@@ -226,6 +226,99 @@ class FakeConnection:
         self.closed = True
 
 
+class PageAdmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        static = self.root / "frontend" / "dist"
+        (static / "assets").mkdir(parents=True)
+        self.page = "<!doctype html><title>Synthetic app page</title>"
+        (static / "index.html").write_text(self.page)
+        self.enterContext(
+            patch("simple_chatbot.server.__file__", str(self.root / "simple_chatbot" / "server.py"))
+        )
+        self.enterContext(patch("simple_chatbot.server.Auth.initialize", new=AsyncMock()))
+
+    def client(self, *, protected=True):
+        config = settings(self.root / "unused", protected=protected, enabled=False)
+        app = create_app(config)
+        client = self.enterContext(
+            TestClient(app, base_url=config.public_origin, follow_redirects=False)
+        )
+        return app, client
+
+    def assert_login_redirect(self, response):
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/example/auth/login")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertNotIn(self.page, response.text)
+
+    def test_private_page_requires_signed_in_session(self):
+        app, client = self.client()
+        self.assert_login_redirect(client.get("/example/"))
+        unsigned = app.state.auth.create("", "anonymous", time.time() + 300)
+        client.cookies.set(app.state.auth.cookie, unsigned.id)
+        self.assert_login_redirect(client.get("/example/"))
+        self.assertEqual(client.get("/healthz").status_code, 200)
+
+    def test_signed_in_page_and_local_logout(self):
+        app, client = self.client()
+        session = app.state.auth.create(
+            "synthetic-token", "user", time.time() + 300, signed_in=True
+        )
+        client.cookies.set(app.state.auth.cookie, session.id)
+        response = client.get("/example/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, self.page)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        response = client.post(
+            "/example/auth/logout",
+            headers={"origin": "https://voice.example.com", "x-csrf-token": session.csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(session.id, app.state.auth.sessions)
+        self.assert_login_redirect(client.get("/example/"))
+        with patch.object(app.state.auth, "login") as login:
+            landing = client.get("/example/auth/signed-out", follow_redirects=True)
+            login.assert_not_called()
+        self.assertEqual(landing.status_code, 200)
+        self.assertEqual(landing.headers["cache-control"], "no-store")
+        self.assertIn('href="/example/auth/login"', landing.text)
+        self.assertIn("Your Keycloak session may still be active.", landing.text)
+        self.assertNotIn(self.page, landing.text)
+
+    def test_rejected_logout_keeps_app_session(self):
+        app, client = self.client()
+        session = app.state.auth.create(
+            "synthetic-token", "user", time.time() + 300, signed_in=True
+        )
+        client.cookies.set(app.state.auth.cookie, session.id)
+        response = client.post(
+            "/example/auth/logout",
+            headers={"origin": "https://voice.example.com", "x-csrf-token": "invalid"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(session.id, app.state.auth.sessions)
+        self.assertEqual(client.get("/example/").text, self.page)
+
+    def test_expired_private_session_redirects_to_login(self):
+        app, client = self.client()
+        session = app.state.auth.create(
+            "synthetic-token", "user", time.time() + 300, signed_in=True
+        )
+        client.cookies.set(app.state.auth.cookie, session.id)
+        session.expires = time.time() - 1
+        self.assert_login_redirect(client.get("/example/"))
+
+    def test_explicit_anonymous_app_shows_page_without_login(self):
+        _, client = self.client(protected=False)
+        response = client.get("/example/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, self.page)
+        reset = client.get("/example/auth/signed-out")
+        self.assertEqual(reset.status_code, 303)
+        self.assertEqual(reset.headers["location"], "/example/")
+
+
 class SessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_optional_public_login_keeps_explicit_bot_credential_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
