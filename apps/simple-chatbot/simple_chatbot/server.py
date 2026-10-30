@@ -12,7 +12,7 @@ from typing import Literal
 import httpx
 from aiortc.sdp import candidate_from_sdp
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pipecat.transports.smallwebrtc.connection import IceServer
@@ -216,6 +216,18 @@ def create_app(settings: Settings) -> FastAPI:
     async def callback(request: Request):
         return await auth.callback(request)
 
+    @app.get(base + "/auth/signed-out")
+    async def signed_out():
+        if settings.anonymous:
+            return RedirectResponse(base + "/", status_code=303)
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            "<title>Signed out</title></head><body><main><h1>You are signed out</h1>"
+            "<p>You have signed out of this app. Your Keycloak session may still be active.</p>"
+            f'<a href="{base}/auth/login">Sign in again</a></main></body></html>'
+        )
+
     @app.post(base + "/auth/logout")
     async def logout(request: Request):
         session = auth.mutation(request)
@@ -396,7 +408,14 @@ def create_app(settings: Settings) -> FastAPI:
         app.mount(base + "/assets", StaticFiles(directory=static / "assets"), name="assets")
 
         @app.get(base + "/")
-        async def index():
+        async def index(request: Request):
+            if not settings.anonymous:
+                try:
+                    signed_in = auth.get(request).signed_in
+                except HTTPException:
+                    signed_in = False
+                if not signed_in:
+                    return RedirectResponse(base + "/auth/login", status_code=303)
             return FileResponse(static / "index.html")
 
         @app.get("/")

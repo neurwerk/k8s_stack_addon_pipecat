@@ -371,9 +371,16 @@ export function initializeSession(
     mute.textContent = enabled ? "Mute microphone" : "Unmute microphone";
   };
   logout.onclick = async () => {
-    await stopCurrent();
-    await mutation("/auth/logout");
-    location.reload();
+    logout.disabled = true;
+    try {
+      await stopCurrent();
+      const response = await mutation("/auth/logout");
+      if (!response.ok) throw new Error("Sign-out failed");
+      location.replace(`${base}/auth/signed-out`);
+    } catch {
+      logout.disabled = false;
+      status.textContent = "Could not sign out. Please try again.";
+    }
   };
   void initialize().catch(() => {
     status.textContent = "Unable to load this bot. Reload to retry.";
