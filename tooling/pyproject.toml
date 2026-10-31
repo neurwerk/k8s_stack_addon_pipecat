@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipecat-tooling"
-version = "0.2.0"
+version = "0.2.1"
 description = "Pipecat app bundle publishing, operations and product selection validation."
 readme = "README.md"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
