@@ -3,15 +3,15 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.2.0
+  version: 0.2.1
   # Runtime 0.2.0 and tooling 0.2.1 publication and anonymous linux/amd64 pulls verified.
   status: ready
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
-    base: 0.4.0
-    tooling: 0.15.6
-    stackSetup: 0.8.3
+    base: 0.3.30
+    tooling: 0.15.8
+    stackSetup: 0.8.4
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
     baseChartVersions:
       charts/keycloak/addon-access: 0.1.7

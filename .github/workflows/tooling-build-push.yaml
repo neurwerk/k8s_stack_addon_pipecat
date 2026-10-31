@@ -39,7 +39,7 @@ jobs:
     uses: ./.github/workflows/tooling-quality.yaml
     with:
       # Publish the tooling artifact before alpha installation, not a stable product release.
-      base_ref: d2053342856a82905d5ee3f00879e0547cb22909
+      base_ref: 1cb3aa042e8b2ba3dcaf3623cc66d3c43395315c
   build:
     needs: [validate, quality]
     runs-on: ubuntu-latest
