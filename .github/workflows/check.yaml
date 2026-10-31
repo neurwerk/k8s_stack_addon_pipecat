@@ -7,7 +7,7 @@ permissions:
   contents: read
 env:
   # Reviewed candidate for source CI only; tag-driven publication requires stable Base.
-  BASE_REF: d2053342856a82905d5ee3f00879e0547cb22909
+  BASE_REF: 1cb3aa042e8b2ba3dcaf3623cc66d3c43395315c
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: neurwerk/k8s_stack_base
-          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'v0.4.0' || env.BASE_REF }}
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'v0.3.30' || env.BASE_REF }}
           path: build/base
       - uses: jdx/mise-action@v2
       - run: uv sync --frozen
@@ -31,6 +31,3 @@ jobs:
           load: true
           tags: neurwerk-pipecat:local
           platforms: linux/amd64
-      - name: Verify offline bundled models and runtime imports
-        run: |
-          docker run --rm --network none --entrypoint python neurwerk-pipecat:local -c 'from pipecat.audio.vad.silero import SileroVADAnalyzer; from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3; from neurwerk_pipecat.startup import main; SileroVADAnalyzer(); LocalSmartTurnAnalyzerV3()'

@@ -157,12 +157,12 @@ def test_real_setup_preserves_raw_keys_and_validates_isolated_verifiers():
         installed = version("openbao-stack-setup")
     except PackageNotFoundError:
         pytest.fail(
-            "Required integration prerequisite missing: install openbao-stack-setup==0.8.3 "
+            "Required integration prerequisite missing: install openbao-stack-setup==0.8.4 "
             "from the declared release source or an explicit reviewed candidate wheel",
             pytrace=False,
         )
-    assert installed == "0.8.3", "Required integration needs openbao-stack-setup==0.8.3"
-    assert version("k8s-stack-tooling") == "0.15.6"
+    assert installed == "0.8.4", "Required integration needs openbao-stack-setup==0.8.4"
+    assert version("k8s-stack-tooling") == "0.15.8"
     from openbao_stack_setup import client as client_module
     from openbao_stack_setup import declarative
 
