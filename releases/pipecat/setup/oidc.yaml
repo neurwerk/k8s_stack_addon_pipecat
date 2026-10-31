@@ -24,4 +24,4 @@ spec:
     - {kind: ConfigMap, name: pipecat-oidc-settings}
   values:
     k8sTools:
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.14.0@sha256:a1db80f00e8579478382ecc34717af484cf75239008ae8dbe66b01632aa49305
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db

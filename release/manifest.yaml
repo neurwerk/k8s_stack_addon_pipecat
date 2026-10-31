@@ -14,8 +14,8 @@ spec:
     stackSetup: 0.8.0
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
     baseChartVersions:
-      charts/keycloak/addon-access: 0.1.6
-      charts/keycloak/addon-oidc: 0.2.1
+      charts/keycloak/addon-access: 0.1.7
+      charts/keycloak/addon-oidc: 0.2.2
   inputs:
     - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: client-values, owner: client}
     - {kind: ConfigMap, namespace: auth-keycloak-api-key-bridge, name: pipecat-product-values, owner: client}
@@ -66,10 +66,10 @@ spec:
       image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93
     - id: identity-provisioner
       role: shared
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.14.0@sha256:a1db80f00e8579478382ecc34717af484cf75239008ae8dbe66b01632aa49305
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
     - id: access-provisioner
       role: shared
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.13.8@sha256:9cf6f1c744636f66a4b1985c29c24de1bb9c7ecb07e9c8f05e81dad56c9cf207
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
   consumers:
     - {artifact: tooling, kind: Command, argv: [pipecat-validate, /work/addon]}
     - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: bot, optional: true}
