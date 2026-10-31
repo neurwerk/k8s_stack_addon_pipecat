@@ -654,8 +654,8 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-tooling"
-version = "0.15.0"
-source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.0/k8s_stack_tooling-0.15.0-py3-none-any.whl" }
+version = "0.15.6"
+source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.6/k8s_stack_tooling-0.15.6-py3-none-any.whl" }
 dependencies = [
     { name = "cryptography" },
     { name = "defusedxml" },
@@ -669,7 +669,7 @@ dependencies = [
     { name = "requests" },
 ]
 wheels = [
-    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.0/k8s_stack_tooling-0.15.0-py3-none-any.whl", hash = "sha256:2bb115aaf126391f8a201963005e733136b72c10c7cd9543b33fb0136f6628a2" },
+    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.6/k8s_stack_tooling-0.15.6-py3-none-any.whl", hash = "sha256:48c289d30274a3f30e8dba9f1128aeb3a4d562bba6fd9391511a398e213f0894" },
 ]
 
 [package.metadata]
@@ -868,8 +868,8 @@ wheels = [
 
 [[package]]
 name = "openbao-stack-setup"
-version = "0.8.0"
-source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.0/openbao_stack_setup-0.8.0-py3-none-any.whl" }
+version = "0.8.3"
+source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.3/openbao_stack_setup-0.8.3-py3-none-any.whl" }
 dependencies = [
     { name = "cryptography" },
     { name = "k8s-stack-tooling" },
@@ -879,13 +879,13 @@ dependencies = [
     { name = "requests" },
 ]
 wheels = [
-    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.0/openbao_stack_setup-0.8.0-py3-none-any.whl", hash = "sha256:45f3a319022f29fc3508b855726ffa5ae4bea6f8a16d7f9ceda8c5627ecfb7d1" },
+    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.3/openbao_stack_setup-0.8.3-py3-none-any.whl", hash = "sha256:ed654faa8d26fa93a8976d4e7ca459d6f8422eca4c0e837195e6d3c52dc9f03b" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.0/k8s_stack_tooling-0.15.0-py3-none-any.whl" },
+    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.6/k8s_stack_tooling-0.15.6-py3-none-any.whl" },
     { name = "kubernetes", specifier = ">=36.0.3,<37" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "questionary", specifier = ">=2.1" },
@@ -922,13 +922,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
-    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.0/k8s_stack_tooling-0.15.0-py3-none-any.whl" },
+    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.6/k8s_stack_tooling-0.15.6-py3-none-any.whl" },
     { name = "ruamel-yaml", specifier = ">=0.18,<0.19" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "openbao-stack-setup", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.0/openbao_stack_setup-0.8.0-py3-none-any.whl" },
+    { name = "openbao-stack-setup", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.3/openbao_stack_setup-0.8.3-py3-none-any.whl" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.15.17" },
     { name = "ty", specifier = ">=0.0.49" },

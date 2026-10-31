@@ -11,16 +11,16 @@ authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY.md"]
 requires-python = ">=3.12"
-dependencies = ["k8s-stack-tooling==0.15.0", "boto3>=1.42,<2", "ruamel.yaml>=0.18,<0.19"]
+dependencies = ["k8s-stack-tooling==0.15.6", "boto3>=1.42,<2", "ruamel.yaml>=0.18,<0.19"]
 
 [project.scripts]
 pipecat-validate = "pipecat_tooling.cli:main"
 pipecat-apps = "pipecat_tooling.apps:main"
 
 [tool.uv.sources]
-k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.0/k8s_stack_tooling-0.15.0-py3-none-any.whl"}
+k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.15.6/k8s_stack_tooling-0.15.6-py3-none-any.whl"}
 # Setup is a separate release; both artifacts are hash-pinned in uv.lock.
-openbao-stack-setup = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.0/openbao_stack_setup-0.8.0-py3-none-any.whl"}
+openbao-stack-setup = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.3/openbao_stack_setup-0.8.3-py3-none-any.whl"}
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pipecat_tooling"]
@@ -47,7 +47,7 @@ include = ["src", "tests"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.17", "ty>=0.0.49", "pytest>=8", "openbao-stack-setup==0.8.0"]
+dev = ["ruff>=0.15.17", "ty>=0.0.49", "pytest>=8", "openbao-stack-setup==0.8.3"]
 
 [project.urls]
 Homepage = "https://github.com/neurwerk/k8s_stack_addon_pipecat"

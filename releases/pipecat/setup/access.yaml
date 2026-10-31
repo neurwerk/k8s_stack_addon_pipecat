@@ -18,7 +18,7 @@ spec:
     - {kind: ConfigMap, name: pipecat-oidc-approval-values}
   values:
     k8sTools:
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.13.8@sha256:9cf6f1c744636f66a4b1985c29c24de1bb9c7ecb07e9c8f05e81dad56c9cf207
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
     addonAccess:
       enabled: true
       name: pipecat
