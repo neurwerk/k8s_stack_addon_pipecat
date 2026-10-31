@@ -4,7 +4,7 @@ metadata:
   name: pipecat
 spec:
   version: 0.2.0
-  # Runtime and tooling 0.2.0 publication and anonymous linux/amd64 pulls verified.
+  # Runtime 0.2.0 and tooling 0.2.1 publication and anonymous linux/amd64 pulls verified.
   status: ready
   sourceName: pipecat-addon
   configurationKey: pipecat
@@ -57,7 +57,7 @@ spec:
   artifacts:
     - id: tooling
       role: product
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.2.0@sha256:4037ce3ea612b85dd0f38024b2f24f0ec8aa61f257a70f8de765b25b9b2a0292
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.2.1@sha256:e281b448468dd5937239d4582123035a9adb832f9176711b4f3a4d2055a2fe57
     - id: runtime
       role: native
       image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.0@sha256:6ae34fe6a12e03715f553d4065e3cf89cb53fcb8202b1ace659d01cf19cb5878
