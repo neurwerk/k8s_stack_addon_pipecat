@@ -7,7 +7,7 @@ permissions:
   contents: read
 env:
   # Reviewed candidate for source CI only; tag-driven publication requires stable Base.
-  BASE_REF: e5eca150c0f71d3f80b135c67f2451758a8f3db1
+  BASE_REF: d2053342856a82905d5ee3f00879e0547cb22909
 jobs:
   check:
     runs-on: ubuntu-24.04
