@@ -46,7 +46,7 @@ image-build:
 	docker build --tag neurwerk-pipecat:local .
 
 tooling-check:
-	@test -f tooling/uv.lock || { echo 'Release prerequisite missing: publish shared Tooling 0.15.0/setup 0.8.0 sources, then generate and review tooling/uv.lock'; exit 1; }
+	@test -f tooling/uv.lock || { echo 'Release prerequisite missing: publish shared Tooling 0.15.6/setup 0.8.3 sources, then generate and review tooling/uv.lock'; exit 1; }
 	cd tooling && uv lock --check
 	$(TOOLING) ruff check tooling
 	$(TOOLING) ruff format --check tooling

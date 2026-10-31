@@ -10,8 +10,8 @@ spec:
   configurationKey: pipecat
   prerequisites:
     base: 0.4.0
-    tooling: 0.15.0
-    stackSetup: 0.8.0
+    tooling: 0.15.6
+    stackSetup: 0.8.3
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
     baseChartVersions:
       charts/keycloak/addon-access: 0.1.7
