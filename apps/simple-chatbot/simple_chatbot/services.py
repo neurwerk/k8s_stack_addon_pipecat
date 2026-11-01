@@ -209,7 +209,10 @@ class GatewayLLM(FrameProcessor):
                 "POST",
                 self.settings.gateway_url,
                 follow_redirects=False,
-                headers={"X-Neurwerk-Authorization": "Bearer " + self.credential},
+                headers={
+                    "X-Neurwerk-Authorization": "Bearer " + self.credential,
+                    "X-Neurwerk-Credential-Mode": self.settings.credential_mode,
+                },
                 json={
                     "model": self.settings.model_id,
                     "messages": messages,

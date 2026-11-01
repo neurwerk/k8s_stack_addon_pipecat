@@ -515,8 +515,19 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     captured[0].headers["X-Neurwerk-Authorization"], "Bearer delegated-user-token"
                 )
+                self.assertEqual(captured[0].headers["X-Neurwerk-Credential-Mode"], "none")
                 self.assertNotIn("Authorization", captured[0].headers)
                 self.assertEqual(json.loads(captured[0].content)["model"], "canonical-model")
+                global_config = config.model_copy(update={"credential_mode": "global"})
+                global_llm = GatewayLLM(global_config, http, "delegated-user-token", lambda _: None)
+                global_llm.push_frame = AsyncMock()
+                await global_llm.process_frame(
+                    LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM
+                )
+                self.assertEqual(captured[1].headers["X-Neurwerk-Credential-Mode"], "global")
+                self.assertEqual(
+                    captured[1].headers["X-Neurwerk-Authorization"], "Bearer delegated-user-token"
+                )
             captured.clear()
 
             def deny(request):
