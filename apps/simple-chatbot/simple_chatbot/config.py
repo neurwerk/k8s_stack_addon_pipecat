@@ -4,6 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -52,6 +53,7 @@ class Settings(BaseModel):
     oidc: OIDC | None = None
     gateway_origin: str = ""
     gateway_base_url: str = ""
+    credential_mode: Literal["none", "global"] = "none"
     binding_id: str = Field(default="", pattern=r"^$|^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
     model_id: str = Field(default="", max_length=200)
     stt: Speech | None = None
