@@ -15,7 +15,7 @@ permissions:
   contents: read
 env:
   # Reviewed candidate for source CI only; tag-driven publication requires stable Base.
-  BASE_REF: 1cb3aa042e8b2ba3dcaf3623cc66d3c43395315c
+  BASE_REF: 0d2a31614776a1c85e693d9e6620849faa5b2e19
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: neurwerk/k8s_stack_base
-          ref: ${{ inputs.base_ref || (startsWith(github.ref, 'refs/tags/') && 'v0.3.30' || env.BASE_REF) }}
+          ref: ${{ inputs.base_ref || (startsWith(github.ref, 'refs/tags/') && 'v0.3.31' || env.BASE_REF) }}
           path: build/base
       - uses: jdx/mise-action@v2
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
