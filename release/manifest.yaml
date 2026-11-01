@@ -3,13 +3,13 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.2.1
-  # Runtime 0.2.0 and tooling 0.2.1 publication and anonymous linux/amd64 pulls verified.
+  version: 0.2.2
+  # Runtime 0.2.1 and tooling 0.2.1 publication and anonymous linux/amd64 pulls verified.
   status: ready
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
-    base: 0.3.30
+    base: 0.3.31
     tooling: 0.15.8
     stackSetup: 0.8.4
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
@@ -60,7 +60,7 @@ spec:
       image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.2.1@sha256:e281b448468dd5937239d4582123035a9adb832f9176711b4f3a4d2055a2fe57
     - id: runtime
       role: native
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.0@sha256:6ae34fe6a12e03715f553d4065e3cf89cb53fcb8202b1ace659d01cf19cb5878
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.1@sha256:9510faa90e22da94735f714c283e97c14b143fe180c2abe93c0e2cc3eb1775ed
     - id: coturn
       role: native
       image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93

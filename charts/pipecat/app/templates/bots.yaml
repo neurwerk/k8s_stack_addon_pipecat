@@ -20,7 +20,7 @@
 {{- if and (not (empty $gatewayRef)) (hasPrefix "pipecat-bot-" $gatewayRef.name) (or (ne $gatewayRef.name (printf "pipecat-bot-%s" $bot.id)) (ne $gatewayRef.key "gatewayApiKey")) }}{{ fail "Managed gateway Secret references must match their bot and gatewayApiKey field" }}{{ end }}
 {{- $credentials := dict }}
 {{- $sessions := $bot.sessionsEnabled | default false }}
-{{- $config := dict "bot_id" $bot.id "url_slug" $slug "sessions_enabled" $sessions "title" ($bot.title | default "Voice assistant") "public_origin" (printf "https://%s" $hostname) "anonymous" $anonymous "gateway_origin" $p.gatewayOrigin "binding_id" ($bot.bindingId | default "") "model_id" ($bot.modelId | default "") }}
+{{- $config := dict "bot_id" $bot.id "url_slug" $slug "sessions_enabled" $sessions "title" ($bot.title | default "Voice assistant") "public_origin" (printf "https://%s" $hostname) "anonymous" $anonymous "gateway_origin" $p.gatewayOrigin "binding_id" ($bot.bindingId | default "") "model_id" ($bot.modelId | default "") "credential_mode" ($bot.gatewayCredentialMode | default "none") }}
 {{- with $bot.gatewayBaseUrl }}{{- $_ := set $config "gateway_base_url" . }}{{- end }}
 {{- if $p.turn.enabled }}
 {{- $_ := set $credentials "turn" (dict "name" $p.turn.secretName "key" "sharedSecret") }}
