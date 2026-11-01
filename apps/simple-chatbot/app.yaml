@@ -1,5 +1,5 @@
 id: simple-chatbot
-runtimeVersion: 0.2.0
+runtimeVersion: 0.2.1
 entrypoint: server.py
 requirements: requirements.lock
 files:
