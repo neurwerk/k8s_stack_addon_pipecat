@@ -456,10 +456,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 str(captured[0].url),
                 "https://gateway.example.com/company-chat/v1/chat/completions",
             )
-            self.assertEqual(
-                captured[0].headers["X-Neurwerk-Authorization"], "Bearer delegated-user-token"
-            )
-            self.assertNotIn("Authorization", captured[0].headers)
+            self.assertEqual(captured[0].headers["Authorization"], "Bearer delegated-user-token")
+            self.assertNotIn("X-Neurwerk-Authorization", captured[0].headers)
             self.assertFalse(llm.is_usable)
             for base in (
                 "http://gateway.example.com/company-chat/v1",
@@ -513,10 +511,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("Report", json.dumps(context.get_messages()))
                 self.assertEqual(captured[0].url.path, "/bindings/voice/v1/chat/completions")
                 self.assertEqual(
-                    captured[0].headers["X-Neurwerk-Authorization"], "Bearer delegated-user-token"
+                    captured[0].headers["Authorization"], "Bearer delegated-user-token"
                 )
-                self.assertEqual(captured[0].headers["X-Neurwerk-Credential-Mode"], "none")
-                self.assertNotIn("Authorization", captured[0].headers)
+                self.assertNotIn("X-Neurwerk-Credential-Mode", captured[0].headers)
+                self.assertNotIn("X-Neurwerk-Authorization", captured[0].headers)
                 self.assertEqual(json.loads(captured[0].content)["model"], "canonical-model")
                 global_config = config.model_copy(update={"credential_mode": "global"})
                 global_llm = GatewayLLM(global_config, http, "delegated-user-token", lambda _: None)
@@ -524,9 +522,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 await global_llm.process_frame(
                     LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM
                 )
-                self.assertEqual(captured[1].headers["X-Neurwerk-Credential-Mode"], "global")
+                self.assertNotIn("X-Neurwerk-Credential-Mode", captured[1].headers)
                 self.assertEqual(
-                    captured[1].headers["X-Neurwerk-Authorization"], "Bearer delegated-user-token"
+                    captured[1].headers["Authorization"], "Bearer delegated-user-token"
                 )
             captured.clear()
 
