@@ -35,3 +35,25 @@ Provision the bucket and separate reader/publisher users before the first upload
 The publisher uses ordinary approved workstation AWS credentials or a named profile, never credentials in command arguments. `--endpoint` is the workstation upload endpoint; `--runtime-endpoint` selects the in-cluster endpoint on first publication or an explicit change. Existing runtime endpoints, Secret references and key aliases are preserved. Uploads require HTTPS unless `--allow-local-http` explicitly permits loopback port-forward access; the first HTTP upload also requires `--runtime-endpoint`. Runtime HTTP service endpoints do not relax the upload rule.
 
 Publishing creates a deterministic, content-addressed immutable object, verifies its SHA-256, then updates only the selected app's `script` fields in the client Git working tree. Review the diff, commit and push explicitly; Flux performs the replacement, ending that app's active calls. `enabled: false` removes its workload without removing identity or credential setup. There is no direct deployment patch or restart command. Runtime's init container verifies the archive before exposing read-only `/scripts/bundle`; the bot container receives no S3 credentials. Retain storage and users on removal; deletion needs separate approval.
+
+## Upload from any workstation
+
+Use a machine with Python, uv, kubectl and approved cluster access. Start from the reviewed app source with its matching built frontend and dependency files; these can come from that revision's successful CI build. Use a separate client Git worktree for the pin update.
+
+1. Use the existing approved publisher account through an AWS profile or temporary process environment. If credentials come from a Kubernetes Secret, load them without printing or saving them; do not use the bot's read-only account.
+2. For an internal S3 service, keep this command running in a separate terminal (replace the placeholders):
+
+   ```sh
+   kubectl --context "<context>" -n "<storage-namespace>" port-forward service/<s3-service> 18993:<service-port> --address=127.0.0.1
+   ```
+
+3. From the add-on checkout, validate and upload:
+
+   ```sh
+   uv run --locked --project tooling pipecat-apps validate --apps-dir apps --app "<app>"
+   uv run --locked --project tooling pipecat-apps update --apps-dir apps --app "<app>" --client "<client-id>" --context "<context>" --namespace "<bot-namespace>" --client-repo "<client-worktree>" --values "<product-values-file>" --endpoint http://127.0.0.1:18993 --allow-local-http --bucket "<bucket>"
+   ```
+
+   This preserves the existing in-cluster endpoint and verifies the uploaded checksum. For a directly reachable HTTPS endpoint, use that URL and omit `--allow-local-http`.
+4. Review and validate the client diff, then commit and merge through the normal deployment process. Verify the bot is ready and its page loads.
+5. Stop the port-forward and clear temporary credentials. Keep machine-specific profiles, paths and settings outside the repository.
