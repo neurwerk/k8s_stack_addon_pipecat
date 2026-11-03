@@ -204,6 +204,8 @@ def create_app(settings: Settings) -> FastAPI:
                     "expires": session.expires,
                 }
             )
+            if settings.anonymous or session.signed_in:
+                result["model"] = settings.model_id
         response.body = JSONResponse(result).body
         response.headers["content-length"] = str(len(response.body))
         return response

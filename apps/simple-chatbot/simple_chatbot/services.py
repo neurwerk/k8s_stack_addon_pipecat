@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.text.transforms import strip_markdown
 from pipecat.utils.time import time_now_iso8601
 
 from simple_chatbot.config import Settings, Speech
@@ -322,9 +323,23 @@ class HTTPSTT(SegmentedSTTService):
             await self.push_error("Speech recognition failed", force_treat_as_permanent=True)
 
 
+async def speech_text(text: str, text_type: str) -> str:
+    text = await strip_markdown(text, text_type)
+    # Sentence aggregation can leave isolated emphasis or fence markers. Kokoro
+    # produces no phonemes for these; let TTSService skip the empty result.
+    if all(char.isspace() or char in "*_`~-" for char in text):
+        return ""
+    return text
+
+
 class HTTPTTS(TTSService):
     def __init__(self, settings: Speech, http: httpx.AsyncClient):
-        super().__init__(sample_rate=24000, push_start_frame=True, push_stop_frames=True)
+        super().__init__(
+            sample_rate=24000,
+            push_start_frame=True,
+            push_stop_frames=True,
+            text_transforms=[("*", speech_text)],
+        )
         self.speech = settings
         self.http = http
 

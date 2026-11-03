@@ -4,12 +4,14 @@ import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
+from pipecat.frames.frames import AggregatedTextFrame, ErrorFrame, TTSAudioRawFrame
 from pyee.asyncio import AsyncIOEventEmitter
 
-from simple_chatbot.services import bounded_pcm, bounded_sse
+from simple_chatbot.config import Speech
+from simple_chatbot.services import HTTPTTS, bounded_pcm, bounded_sse
 from simple_chatbot.webrtc import BrowserWebRTCConnection
 
 
@@ -194,6 +196,89 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             b"".join([chunk async for chunk in bounded_pcm(response)]), b"\0" + b"\x01" * 5
         )
+
+
+class SpeechTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.requests = []
+        self.pcm = b"\x00\x01" * 32
+        self.response = httpx.Response(200, content=self.pcm, headers={"content-type": "audio/pcm"})
+
+        def respond(request):
+            self.requests.append(request)
+            return self.response
+
+        self.http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        self.tts = HTTPTTS(
+            Speech(base_url="https://speech.example.com/v1", model="tts-1"), self.http
+        )
+        self.tts.push_frame = AsyncMock()
+        self.tts.append_to_audio_context = AsyncMock(wraps=self.tts.append_to_audio_context)
+
+    async def asyncTearDown(self):
+        await self.http.aclose()
+
+    async def test_formatting_only_fragments_do_not_request_speech(self):
+        for text in ("**", "*", "---", "-", "`", "```", " \n** ` -\t", "\n"):
+            with self.subTest(text=text):
+                await self.tts._handle_aggregated_text(
+                    AggregatedTextFrame(text, "sentence"), "synthetic"
+                )
+                self.assertEqual(self.requests, [])
+                self.tts.append_to_audio_context.assert_not_awaited()
+                self.tts.push_frame.assert_not_awaited()
+                self.assertTrue(self.tts.is_usable)
+
+    async def test_speech_after_skipped_formatting_preserves_words_and_audio(self):
+        await self.tts._handle_aggregated_text(AggregatedTextFrame("**", "sentence"), "skipped")
+        for text, expected in (
+            ("**Hallo!** Wie geht es _dir_?", "Hallo! Wie geht es dir?"),
+            ("Hallo! 😊", "Hallo! 😊"),
+        ):
+            with self.subTest(text=text):
+                self.requests.clear()
+                self.tts.append_to_audio_context.reset_mock()
+                await self.tts._handle_aggregated_text(
+                    AggregatedTextFrame(text, "sentence"), "synthetic"
+                )
+                self.assertEqual(len(self.requests), 1)
+                self.assertEqual(json.loads(self.requests[0].content)["input"], expected)
+                audio = [
+                    call.args[1]
+                    for call in self.tts.append_to_audio_context.await_args_list
+                    if isinstance(call.args[1], TTSAudioRawFrame)
+                ]
+                self.assertEqual(b"".join(frame.audio for frame in audio), self.pcm)
+                self.assertTrue(
+                    all(
+                        (frame.sample_rate, frame.num_channels, frame.context_id)
+                        == (24000, 1, "synthetic")
+                        for frame in audio
+                    )
+                )
+                self.assertTrue(self.tts.is_usable)
+
+    async def test_real_synthesis_failures_remain_safe_errors(self):
+        private = "synthetic-private-upstream-detail"
+        for status, payload in ((500, private.encode()), (200, b"")):
+            with self.subTest(status=status):
+                self.response = httpx.Response(
+                    status, content=payload, headers={"content-type": "audio/pcm"}
+                )
+                tts = HTTPTTS(self.tts.speech, self.http)
+                tts.push_frame = AsyncMock()
+                await tts._handle_aggregated_text(
+                    AggregatedTextFrame("Hallo!", "sentence"), "synthetic"
+                )
+                errors = [
+                    call.args[0]
+                    for call in tts.push_frame.await_args_list
+                    if isinstance(call.args[0], ErrorFrame)
+                ]
+                self.assertEqual([error.error for error in errors], ["Speech synthesis failed"])
+                self.assertTrue(all(error.exception is None for error in errors))
+                self.assertNotIn(private, str(errors))
+                self.assertFalse(tts.is_usable)
 
 
 class Channel(AsyncIOEventEmitter):

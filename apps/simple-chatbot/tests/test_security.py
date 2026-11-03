@@ -255,10 +255,12 @@ class PageAdmissionTests(unittest.TestCase):
     def test_private_page_requires_signed_in_session(self):
         app, client = self.client()
         self.assert_login_redirect(client.get("/example/"))
+        self.assertNotIn("model", client.get("/example/api/config").json())
         unsigned = app.state.auth.create("", "anonymous", time.time() + 300)
         client.cookies.set(app.state.auth.cookie, unsigned.id)
         self.assert_login_redirect(client.get("/example/"))
         self.assertEqual(client.get("/healthz").status_code, 200)
+        self.assertNotIn("model", client.get("/example/api/config").json())
 
     def test_signed_in_page_and_local_logout(self):
         app, client = self.client()
@@ -270,6 +272,7 @@ class PageAdmissionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.text, self.page)
         self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(client.get("/example/api/config").json()["model"], "canonical-model")
         response = client.post(
             "/example/auth/logout",
             headers={"origin": "https://voice.example.com", "x-csrf-token": session.csrf},
@@ -308,6 +311,7 @@ class PageAdmissionTests(unittest.TestCase):
         client.cookies.set(app.state.auth.cookie, session.id)
         session.expires = time.time() - 1
         self.assert_login_redirect(client.get("/example/"))
+        self.assertNotIn("model", client.get("/example/api/config").json())
 
     def test_explicit_anonymous_app_shows_page_without_login(self):
         _, client = self.client(protected=False)
@@ -348,6 +352,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
                         result = (await client.get("/example/api/config")).json()
                         self.assertTrue(result["loginAvailable"])
                         self.assertFalse(result["signedIn"])
+                        self.assertEqual(result["model"], config.model_id)
                         session = next(iter(app.state.auth.sessions.values()))
                         session.token = "synthetic-delegated-user-token"
                         session.signed_in = True

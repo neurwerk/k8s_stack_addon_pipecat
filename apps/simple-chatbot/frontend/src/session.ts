@@ -43,6 +43,7 @@ function iceList(value: unknown): RTCIceServer[] {
 
 export function initializeSession(
   onClient: (client: PipecatClient) => void,
+  onModel: (model: string) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -56,6 +57,7 @@ export function initializeSession(
   let active: Attempt | undefined;
   let cleanup: Promise<void> = Promise.resolve();
   let sessionsEnabled = false;
+  let startConversation: (() => void) | undefined;
 
   interface Attempt {
     client?: PipecatClient;
@@ -388,6 +390,9 @@ export function initializeSession(
       return;
     }
     if (typeof data.csrf !== "string") throw new Error("Invalid session");
+    if (typeof data.model !== "string" || !data.model.trim())
+      throw new Error("Invalid model configuration");
+    onModel(data.model);
     csrf = data.csrf;
     logout.hidden = false;
     sessionsEnabled = data.sessionsEnabled === true;
@@ -404,21 +409,22 @@ export function initializeSession(
     status.textContent = data.anonymous
       ? "Public bot using its scoped bot credential. Start when ready."
       : "Signed in. Start when ready.";
-    start.onclick = () => {
+    startConversation = () => {
       void connect(servers);
     };
+    start.addEventListener("click", startConversation);
   }
-  end.onclick = () => {
+  const endConversation = () => {
     void stopCurrent();
   };
-  mute.onclick = () => {
+  const toggleMute = () => {
     const client = active?.client;
     if (!client) return;
     const enabled = !client.isMicEnabled;
     client.enableMic(enabled);
     mute.textContent = enabled ? "Mute microphone" : "Unmute microphone";
   };
-  logout.onclick = async () => {
+  const signOut = async () => {
     logout.disabled = true;
     try {
       await stopCurrent();
@@ -430,10 +436,18 @@ export function initializeSession(
       status.textContent = "Could not sign out. Please try again.";
     }
   };
+  // React rerenders must not replace these session-owned button handlers.
+  end.addEventListener("click", endConversation);
+  mute.addEventListener("click", toggleMute);
+  logout.addEventListener("click", signOut);
   void initialize().catch(() => {
     status.textContent = "Unable to load this bot. Reload to retry.";
   });
   return () => {
+    if (startConversation) start.removeEventListener("click", startConversation);
+    end.removeEventListener("click", endConversation);
+    mute.removeEventListener("click", toggleMute);
+    logout.removeEventListener("click", signOut);
     void stopCurrent();
   };
 }

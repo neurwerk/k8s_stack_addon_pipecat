@@ -21,7 +21,13 @@ const RENDER_MODES: { value: TextRenderMode; label: string }[] = [
   { value: "instant", label: "Instant" },
 ];
 
-export function ConversationPanel({ className }: { className?: string }) {
+export function ConversationPanel({
+  model,
+  className,
+}: {
+  model: string;
+  className?: string;
+}) {
   const [renderMode, setRenderMode] = useState<TextRenderMode>("karaoke");
 
   return (
@@ -50,7 +56,11 @@ export function ConversationPanel({ className }: { className?: string }) {
           </SelectContent>
         </Select>
       </PanelHeader>
-      <Conversation textRenderMode={renderMode} className="min-h-0 flex-1" />
+      <Conversation
+        assistantLabel={model}
+        textRenderMode={renderMode}
+        className="min-h-0 flex-1"
+      />
       <div className="shrink-0 p-3">
         <p className="mt-2 text-xs text-muted-foreground">
           Speak after starting a conversation. Your words are sent automatically

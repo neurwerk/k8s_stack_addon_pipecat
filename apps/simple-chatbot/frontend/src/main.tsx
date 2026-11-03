@@ -31,6 +31,7 @@ function MicrophoneControl() {
 }
 
 function App() {
+  const [model, setModel] = useState("");
   // No device initialization before an explicit Start click and admission check.
   const [client, setClient] = useState(
     () =>
@@ -42,7 +43,7 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient), []);
+  useEffect(() => initializeSession(setClient, setModel), []);
 
   return (
     <PipecatClientProvider client={client}>
@@ -120,7 +121,7 @@ function App() {
             aria-label="Assistant audio"
           />
         </section>
-        <ConversationPanel className="min-h-96 flex-1" />
+        <ConversationPanel model={model} className="min-h-96 flex-1" />
         <aside
           aria-labelledby="privacy-heading"
           className="rounded-xl border bg-muted/40 p-5"
