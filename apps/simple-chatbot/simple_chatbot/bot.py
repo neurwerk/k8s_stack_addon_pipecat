@@ -32,6 +32,7 @@ from pipecat.workers.runner import WorkerRunner
 
 from simple_chatbot.config import Settings
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
+from simple_chatbot.timings import TurnTimings
 from simple_chatbot.websocket import BrowserSerializer
 
 
@@ -82,12 +83,17 @@ async def run_bot(
             ),
         ),
     )
+
+    async def send_timing(data: dict) -> None:
+        await worker.rtvi.send_server_message(data)
+
+    timings = TurnTimings(send_timing)
     pipeline = Pipeline(
         [
             transport.input(),
-            HTTPSTT(settings.stt, http),
+            HTTPSTT(settings.stt, http, timings),
             user,
-            GatewayLLM(settings, http, credential, notice),
+            GatewayLLM(settings, http, credential, notice, timings),
             HTTPTTS(settings.tts, http),
             transport.output(),
             assistant,

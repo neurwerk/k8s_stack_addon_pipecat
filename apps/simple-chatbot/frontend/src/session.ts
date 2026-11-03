@@ -7,6 +7,7 @@ import {
   SmallWebRTCTransport,
   WavMediaManager,
 } from "@pipecat-ai/small-webrtc-transport";
+import { parseTiming, type TurnTiming } from "./timings";
 
 function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
   const node = document.getElementById(id);
@@ -44,6 +45,8 @@ function iceList(value: unknown): RTCIceServer[] {
 export function initializeSession(
   onClient: (client: PipecatClient) => void,
   onModel: (model: string) => void,
+  onTimings: (timings: TurnTiming[]) => void,
+  onSpeaking: (speaking: boolean) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -69,6 +72,7 @@ export function initializeSession(
     polling?: ReturnType<typeof setInterval>;
     serverCancel?: Promise<Response>;
     stopped?: Promise<void>;
+    timings: TurnTiming[];
   }
   class Cancelled extends Error {}
   class MediaTimeout extends Error {}
@@ -102,6 +106,13 @@ export function initializeSession(
     attempt.cancelled = true;
     if (attempt.polling) clearInterval(attempt.polling);
     if (active === attempt) {
+      onSpeaking(false);
+      attempt.timings = attempt.timings.map((timing) =>
+        ["complete", "no-audio", "failed", "interrupted"].includes(timing.status)
+          ? timing
+          : { ...timing, status: "interrupted" },
+      );
+      onTimings(attempt.timings);
       active = undefined;
       audio.srcObject = null;
       start.disabled = true;
@@ -160,6 +171,22 @@ export function initializeSession(
     const transport = ++attempt.transport;
     const current = () => owns(attempt) && attempt.transport === transport;
     return {
+      onServerMessage: (data: unknown) => {
+        if (!current()) return;
+        const timing = parseTiming(data);
+        if (!timing) return;
+        attempt.timings = [
+          ...attempt.timings.filter((entry) => entry.turn !== timing.turn),
+          timing,
+        ].sort((a, b) => b.turn - a.turn).slice(0, 8);
+        onTimings(attempt.timings);
+      },
+      onBotStartedSpeaking: () => {
+        if (current()) onSpeaking(true);
+      },
+      onBotStoppedSpeaking: () => {
+        if (current()) onSpeaking(false);
+      },
       onConnected: () => {
         if (current()) attempt.mediaConnected = true;
       },
@@ -234,6 +261,7 @@ export function initializeSession(
         const report = document.createElement("pre");
         report.textContent = entry.text;
         const container = element("notices", HTMLDivElement);
+        container.hidden = false;
         container.append(report);
         while (container.children.length > 8)
           container.firstElementChild?.remove();
@@ -250,8 +278,11 @@ export function initializeSession(
       mediaConnected: false,
       serviceError: false,
       transport: 0,
+      timings: [],
     };
     active = attempt;
+    onTimings([]);
+    onSpeaking(false);
     callError.textContent = "";
     callError.hidden = true;
     start.disabled = true;

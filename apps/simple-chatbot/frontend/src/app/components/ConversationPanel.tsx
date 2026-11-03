@@ -61,12 +61,6 @@ export function ConversationPanel({
         textRenderMode={renderMode}
         className="min-h-0 flex-1"
       />
-      <div className="shrink-0 p-3">
-        <p className="mt-2 text-xs text-muted-foreground">
-          Speak after starting a conversation. Your words are sent automatically
-          when you finish speaking.
-        </p>
-      </div>
     </Panel>
   );
 }

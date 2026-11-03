@@ -9,12 +9,14 @@ import {
   SmallWebRTCTransport,
   WavMediaManager,
 } from "@pipecat-ai/small-webrtc-transport";
-import { BotIcon, ShieldCheckIcon } from "lucide-react";
+import { BotIcon } from "lucide-react";
 
 import { UserAudioControl } from "@/components/pipecat/user-audio-control";
 import { ConnectButtonView } from "@/components/pipecat/connect-button";
 import { Button } from "@/components/ui/button";
 import { ConversationPanel } from "@/app/components/ConversationPanel";
+import { TimingPanel } from "@/app/components/TimingPanel";
+import type { TurnTiming } from "./timings";
 import { initializeSession } from "./session";
 import "./app/globals.css";
 import "./style.css";
@@ -32,6 +34,8 @@ function MicrophoneControl() {
 
 function App() {
   const [model, setModel] = useState("");
+  const [timings, setTimings] = useState<TurnTiming[]>([]);
+  const [speaking, setSpeaking] = useState(false);
   // No device initialization before an explicit Start click and admission check.
   const [client, setClient] = useState(
     () =>
@@ -43,7 +47,7 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient, setModel), []);
+  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking), []);
 
   return (
     <PipecatClientProvider client={client}>
@@ -58,7 +62,7 @@ function App() {
                 Pipecat · Simple chatbot
               </p>
               <h1 id="title" className="text-2xl font-semibold tracking-tight">
-                Voice assistant
+                Demo Assistant
               </h1>
             </div>
           </div>
@@ -122,31 +126,17 @@ function App() {
           />
         </section>
         <ConversationPanel model={model} className="min-h-96 flex-1" />
-        <aside
-          aria-labelledby="privacy-heading"
-          className="rounded-xl border bg-muted/40 p-5"
-        >
-          <h2
-            id="privacy-heading"
-            className="flex items-center gap-2 text-sm font-medium"
-          >
-            <ShieldCheckIcon className="size-4" aria-hidden="true" />
-            Privacy notices
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Requests use your approved AI gateway access. Any personal-data
-            processing notices appear here.
-          </p>
-          <div
-            id="notices"
-            role="log"
-            aria-live="polite"
-            className="mt-3 space-y-3 whitespace-pre-wrap text-sm"
-          />
-        </aside>
+        <TimingPanel timings={timings} speaking={speaking} />
+        <div
+          id="notices"
+          role="log"
+          aria-label="Processing notices"
+          aria-live="polite"
+          hidden
+          className="space-y-3 whitespace-pre-wrap rounded-xl border bg-muted/40 p-5 text-sm"
+        />
         <footer className="text-center text-xs text-muted-foreground">
-          Built with Pipecat and Pipecat UI · Camera and text commands are not
-          enabled
+          Built with Pipecat and Pipecat UI
         </footer>
       </main>
     </PipecatClientProvider>

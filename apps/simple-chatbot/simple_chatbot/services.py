@@ -1,13 +1,18 @@
 """Bounded HTTP services. Only gateway content deltas can become speech."""
 
+import asyncio
 import codecs
+import io
 import json
+import time
+import wave
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 
 import httpx
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -23,6 +28,7 @@ from pipecat.utils.time import time_now_iso8601
 
 from simple_chatbot.config import Settings, Speech
 from simple_chatbot.notices import NoticeSplitter, SpeechControlFilter
+from simple_chatbot.timings import TurnTiming, TurnTimings
 
 
 def speech_headers(speech: Speech) -> dict[str, str]:
@@ -200,30 +206,40 @@ class GatewayLLM(FrameProcessor):
         http: httpx.AsyncClient,
         credential: str,
         notice: Callable[[str], None],
+        timings: TurnTimings | None = None,
     ):
         super().__init__()
         self.settings = settings
         self.http = http
         self.credential = credential
         self.notice = notice
+        self.timings = timings
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if not isinstance(frame, LLMContextFrame):
             await self.push_frame(frame, direction)
             return
-        await self.push_frame(LLMFullResponseStartFrame())
+        timing = await self.timings.begin_llm() if self.timings else None
+        start = LLMFullResponseStartFrame()
+        if timing:
+            start.metadata["turn_timing"] = timing
+        await self.push_frame(start)
         splitter = NoticeSplitter()
         speech = SpeechControlFilter()
         spoken = False
         try:
             messages = frame.context.get_messages()
             if len(json.dumps(messages)) > self.settings.max_history_chars:
+                if timing:
+                    await timing.finish("failed")
                 await self.push_error(
                     "Conversation limit reached. Start a new conversation.",
                     force_treat_as_permanent=True,
                 )
                 return
+            if timing:
+                timing.llm_started = time.monotonic()
             async with self.http.stream(
                 "POST",
                 self.settings.gateway_url,
@@ -255,25 +271,37 @@ class GatewayLLM(FrameProcessor):
                                 raise ValueError("Content limit exceeded")
                             clean = speech.feed(splitter.feed(text))
                             if clean:
+                                if timing and clean.strip():
+                                    await timing.first_text()
                                 spoken |= bool(clean.strip())
                                 await self.push_frame(LLMTextFrame(clean))
             if not spoken:
                 raise ValueError("No assistant speech content")
         except httpx.HTTPStatusError as error:
+            if timing:
+                await timing.finish("failed")
             await self.push_error(
                 f"Model request rejected (HTTP {error.response.status_code}).",
                 force_treat_as_permanent=True,
             )
         except httpx.HTTPError:
+            if timing:
+                await timing.finish("failed")
             await self.push_error(
                 "Model connection failed or timed out. Please retry.", force_treat_as_permanent=True
             )
         except (ValueError, KeyError, TypeError):
+            if timing:
+                await timing.finish("failed")
             # Exception details can contain upstream payloads or credentials.
             await self.push_error(
                 "Model response was invalid or incomplete. Please retry.",
                 force_treat_as_permanent=True,
             )
+        except asyncio.CancelledError:
+            if timing:
+                await timing.finish("interrupted")
+            raise
         finally:
             splitter.finish()
             if splitter.notice:
@@ -282,10 +310,13 @@ class GatewayLLM(FrameProcessor):
 
 
 class HTTPSTT(SegmentedSTTService):
-    def __init__(self, settings: Speech, http: httpx.AsyncClient):
+    def __init__(
+        self, settings: Speech, http: httpx.AsyncClient, timings: TurnTimings | None = None
+    ):
         super().__init__(sample_rate=16000)
         self.speech = settings
         self.http = http
+        self.timings = timings
 
     async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         # Pinned Pipecat's segmented adapter has an unbounded queue and utterance buffer.
@@ -297,6 +328,15 @@ class HTTPSTT(SegmentedSTTService):
         await super().process_audio_frame(frame, direction)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        timing = await self.timings.begin_stt() if self.timings else None
+        audio_seconds = None
+        if timing:
+            try:
+                with wave.open(io.BytesIO(audio)) as wav:
+                    audio_seconds = wav.getnframes() / wav.getframerate()
+            except (wave.Error, EOFError):
+                pass
+        started = time.monotonic()
         try:
             async with self.http.stream(
                 "POST",
@@ -318,9 +358,19 @@ class HTTPSTT(SegmentedSTTService):
                 text = json.loads(data)["text"]
                 if not isinstance(text, str) or len(text) > 8192:
                     raise ValueError("Invalid transcript")
+                if timing:
+                    await timing.transcribed(
+                        time.monotonic() - started, len(text.split()), audio_seconds
+                    )
                 yield TranscriptionFrame(text, "", time_now_iso8601())
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            if timing:
+                await timing.finish("failed")
             await self.push_error("Speech recognition failed", force_treat_as_permanent=True)
+        except asyncio.CancelledError:
+            if timing:
+                await timing.finish("interrupted")
+            raise
 
 
 async def speech_text(text: str, text_type: str) -> str:
@@ -342,8 +392,26 @@ class HTTPTTS(TTSService):
         )
         self.speech = settings
         self.http = http
+        self.timing: TurnTiming | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self.timing = frame.metadata.get("turn_timing")
+        elif isinstance(frame, InterruptionFrame):
+            if self.timing:
+                await self.timing.finish("interrupted")
+            self.timing = None
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMFullResponseEndFrame) and self.timing:
+            await self.timing.finish(
+                "complete" if self.timing.first_audio_at is not None else "no-audio"
+            )
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        timing = self.timing
+        if timing:
+            await timing.start_tts()
         try:
             async with self.http.stream(
                 "POST",
@@ -358,6 +426,14 @@ class HTTPTTS(TTSService):
             ) as response:
                 response.raise_for_status()
                 async for audio in bounded_pcm(response):
+                    if timing:
+                        await timing.first_audio()
                     yield TTSAudioRawFrame(audio, 24000, 1, context_id=context_id)
         except (httpx.HTTPError, ValueError):
+            if timing:
+                await timing.finish("failed")
             await self.push_error("Speech synthesis failed", force_treat_as_permanent=True)
+        except asyncio.CancelledError:
+            if timing:
+                await timing.finish("interrupted")
+            raise
