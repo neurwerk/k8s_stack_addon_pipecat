@@ -17,6 +17,7 @@ files:
 - simple_chatbot/notices.py
 - simple_chatbot/server.py
 - simple_chatbot/services.py
+- simple_chatbot/timings.py
 - simple_chatbot/turn.py
 - simple_chatbot/webrtc.py
 - simple_chatbot/websocket.py

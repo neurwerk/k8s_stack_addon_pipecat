@@ -3,17 +3,54 @@
 import hashlib
 import io
 import json
+import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 from neurwerk_pipecat import __version__
 from neurwerk_pipecat.bundle import extract
 
 
 class BundleTests(unittest.TestCase):
+    def test_manifest_selected_chatbot_modules_import(self):
+        app = Path(__file__).resolve().parents[1] / "apps/simple-chatbot"
+        manifest = yaml.safe_load((app / "app.yaml").read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in manifest["files"]:
+                if name.endswith(".py"):
+                    target = root / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(app / name, target)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import pathlib, runpy, sys; "
+                    "root = pathlib.Path.cwd().resolve(); sys.path.insert(0, str(root)); "
+                    "runpy.run_path('server.py', run_name='bundle_import_check'); "
+                    "import simple_chatbot.bot; "
+                    "assert all(pathlib.Path(module.__file__).resolve().is_relative_to(root) "
+                    "for name, module in sys.modules.items() "
+                    "if name == 'simple_chatbot' or name.startswith('simple_chatbot.'))",
+                ],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def archive(self, root, entries):
         path = root / "bundle.tar.gz"
         with tarfile.open(path, "w:gz") as archive:
