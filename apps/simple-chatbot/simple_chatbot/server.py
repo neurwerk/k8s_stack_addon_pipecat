@@ -16,10 +16,16 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pipecat.transports.smallwebrtc.connection import IceServer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from simple_chatbot.auth import Auth, WebSession
-from simple_chatbot.config import Settings, browser_ice, load_settings, server_ice
+from simple_chatbot.config import (
+    ConversationOptions,
+    Settings,
+    browser_ice,
+    load_settings,
+    server_ice,
+)
 from simple_chatbot.webrtc import BrowserWebRTCConnection as SmallWebRTCConnection
 
 
@@ -29,8 +35,10 @@ class Offer(BaseModel):
     type: Literal["offer"]
     pc_id: str | None = Field(default=None, max_length=128)
     restart_pc: bool = False
-    request_data: dict | None = None
-    requestData: dict | None = None
+    request_data: ConversationOptions | None = Field(
+        default=None,
+        validation_alias=AliasChoices("request_data", "requestData"),
+    )
 
 
 class Candidate(BaseModel):
@@ -58,7 +66,7 @@ class Peer:
 def create_app(settings: Settings) -> FastAPI:
     peers: dict[str, Peer] = {}
     notices: dict[str, list[dict]] = {}
-    tickets: dict[str, tuple[str, float]] = {}
+    tickets: dict[str, tuple[str, float, ConversationOptions]] = {}
     create_lock = asyncio.Lock()
 
     async def close_peer(pc_id: str) -> None:
@@ -79,7 +87,7 @@ def create_app(settings: Settings) -> FastAPI:
         while True:
             await asyncio.sleep(5)
             auth.prune()
-            for key, (owner, expiry) in list(tickets.items()):
+            for key, (owner, expiry, _) in list(tickets.items()):
                 if expiry <= time.time() or owner not in auth.sessions:
                     tickets.pop(key, None)
             for pc_id, peer in list(peers.items()):
@@ -294,7 +302,12 @@ def create_app(settings: Settings) -> FastAPI:
                     try:
                         async with asyncio.timeout(max(0, session.expires - time.time())):
                             await app.state.run_bot(
-                                connection, settings, http, gateway_credential(session), notice
+                                connection,
+                                settings,
+                                http,
+                                gateway_credential(session),
+                                notice,
+                                body.request_data or ConversationOptions(),
                             )
                     except TimeoutError:
                         pass
@@ -346,17 +359,17 @@ def create_app(settings: Settings) -> FastAPI:
         return {"status": "closed"}
 
     @app.post(base + "/api/websocket-ticket")
-    async def websocket_ticket(request: Request):
+    async def websocket_ticket(request: Request, body: ConversationOptions | None = None):
         session = auth.mutation(request)
         if not settings.sessions_enabled:
             raise HTTPException(409, "Voice sessions are not configured")
-        for key, (owner, expiry) in list(tickets.items()):
+        for key, (owner, expiry, _) in list(tickets.items()):
             if owner == session.id or expiry <= time.time():
                 tickets.pop(key, None)
         if len(tickets) >= settings.max_web_sessions:
             raise HTTPException(429, "Ticket limit reached")
         ticket = secrets.token_urlsafe(32)
-        tickets[ticket] = (session.id, time.time() + 20)
+        tickets[ticket] = (session.id, time.time() + 20, body or ConversationOptions())
         return {"ticket": ticket}
 
     @app.websocket(base + "/api/websocket")
@@ -396,7 +409,7 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             async with asyncio.timeout(max(0, session.expires - time.time())):
                 await app.state.run_bot(
-                    websocket, settings, http, gateway_credential(session), notice
+                    websocket, settings, http, gateway_credential(session), notice, ticket[2]
                 )
         except (TimeoutError, RuntimeError, WebSocketDisconnect):
             pass

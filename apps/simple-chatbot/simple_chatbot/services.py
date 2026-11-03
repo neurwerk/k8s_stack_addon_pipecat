@@ -26,7 +26,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.text.transforms import strip_markdown
 from pipecat.utils.time import time_now_iso8601
 
-from simple_chatbot.config import Settings, Speech
+from simple_chatbot.config import ConversationOptions, Settings, Speech
 from simple_chatbot.notices import NoticeSplitter, SpeechControlFilter
 from simple_chatbot.timings import TurnTiming, TurnTimings
 
@@ -207,6 +207,7 @@ class GatewayLLM(FrameProcessor):
         credential: str,
         notice: Callable[[str], None],
         timings: TurnTimings | None = None,
+        options: ConversationOptions | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -214,6 +215,7 @@ class GatewayLLM(FrameProcessor):
         self.credential = credential
         self.notice = notice
         self.timings = timings
+        self.options = options or ConversationOptions()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -252,6 +254,11 @@ class GatewayLLM(FrameProcessor):
                     "messages": messages,
                     "stream": True,
                     "max_tokens": 512,
+                    **(
+                        {"reasoning": {"effort": self.options.reasoning_effort}}
+                        if self.options.reasoning_effort is not None
+                        else {}
+                    ),
                 },
             ) as response:
                 response.raise_for_status()

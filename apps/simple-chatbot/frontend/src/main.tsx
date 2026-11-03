@@ -101,6 +101,22 @@ function App() {
               />
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                Reasoning
+                <select
+                  id="reasoning"
+                  defaultValue=""
+                  disabled
+                  aria-describedby="reasoning-help"
+                  className="rounded-md border border-input bg-background px-3 py-2 focus-visible:outline-2 disabled:opacity-50"
+                >
+                  <option value="">Model default</option>
+                  <option value="none">Off</option>
+                  <option value="low">Low</option>
+                  <option value="high">High</option>
+                  <option value="max">Max</option>
+                </select>
+              </label>
               <MicrophoneControl />
               <ConnectButtonView id="connect" disabled size="lg">
                 Start conversation
@@ -116,14 +132,15 @@ function App() {
               <button id="mute" hidden type="button">
                 Mute microphone
               </button>
+              <Button id="enable-audio" hidden variant="outline">
+                Enable audio
+              </Button>
             </div>
           </div>
-          <audio
-            id="audio"
-            controls
-            className="mt-4 w-full"
-            aria-label="Assistant audio"
-          />
+          <p id="reasoning-help" className="mt-3 text-sm text-muted-foreground">
+            Applies to a new conversation. Off usually gives faster replies.
+          </p>
+          <audio id="audio" hidden />
         </section>
         <ConversationPanel model={model} className="min-h-96 flex-1" />
         <TimingPanel timings={timings} speaking={speaking} />

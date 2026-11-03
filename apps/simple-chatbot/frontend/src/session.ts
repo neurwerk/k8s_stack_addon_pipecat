@@ -55,6 +55,8 @@ export function initializeSession(
   const mute = element("mute", HTMLButtonElement);
   const logout = element("logout", HTMLButtonElement);
   const audio = element("audio", HTMLAudioElement);
+  const enableAudio = element("enable-audio", HTMLButtonElement);
+  const reasoning = element("reasoning", HTMLSelectElement);
   const base = location.pathname.replace(/\/$/, "");
   let csrf = "";
   let active: Attempt | undefined;
@@ -82,6 +84,17 @@ export function initializeSession(
   function check(attempt: Attempt): void {
     if (!owns(attempt)) throw new Cancelled();
   }
+  async function playAudio(attempt: Attempt): Promise<void> {
+    const transport = attempt.transport;
+    try {
+      await audio.play();
+      if (owns(attempt) && attempt.transport === transport)
+        enableAudio.hidden = true;
+    } catch {
+      if (owns(attempt) && attempt.transport === transport)
+        enableAudio.hidden = false;
+    }
+  }
   function showError(attempt: Attempt, message: string): void {
     attempt.serviceError = true;
     // Keep the cause when closing the transport reports a second error.
@@ -89,10 +102,14 @@ export function initializeSession(
     callError.textContent = message.slice(0, 512);
     callError.hidden = false;
   }
-  function mutation(path: string): Promise<Response> {
+  function mutation(path: string, body?: object): Promise<Response> {
     return fetch(`${base}${path}`, {
       method: "POST",
-      headers: { "X-CSRF-Token": csrf },
+      headers: {
+        "X-CSRF-Token": csrf,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
     });
   }
   async function disconnectOwn(attempt: Attempt): Promise<void> {
@@ -115,6 +132,7 @@ export function initializeSession(
       onTimings(attempt.timings);
       active = undefined;
       audio.srcObject = null;
+      enableAudio.hidden = true;
       start.disabled = true;
       end.disabled = true;
       mute.disabled = true;
@@ -131,6 +149,7 @@ export function initializeSession(
       if (!response.ok) throw new Error("Could not confirm server cleanup");
       if (!active) {
         start.disabled = !sessionsEnabled;
+        reasoning.disabled = !sessionsEnabled;
         mute.textContent = "Mute microphone";
         status.textContent = "Conversation ended.";
       }
@@ -216,10 +235,7 @@ export function initializeSession(
         }
         if (current() && !participant?.local && track.kind === "audio") {
           audio.srcObject = new MediaStream([track]);
-          void audio.play().catch(() => {
-            if (current())
-              status.textContent = "Press play to hear the assistant.";
-          });
+          void playAudio(attempt);
         }
       },
       onDisconnected: () => {
@@ -272,6 +288,8 @@ export function initializeSession(
   }
   async function connect(servers: RTCIceServer[]): Promise<void> {
     if (active || !sessionsEnabled) return;
+    const options = reasoning.value ? { reasoning_effort: reasoning.value } : {};
+    reasoning.disabled = true;
     const attempt: Attempt = {
       cancelled: false,
       connecting: true,
@@ -281,6 +299,7 @@ export function initializeSession(
       timings: [],
     };
     active = attempt;
+    enableAudio.hidden = true;
     onTimings([]);
     onSpeaking(false);
     callError.textContent = "";
@@ -316,6 +335,7 @@ export function initializeSession(
             webrtcRequestParams: {
               endpoint: `${base}/api/offer`,
               headers: { "X-CSRF-Token": csrf },
+              requestData: options,
             },
           }),
         );
@@ -334,7 +354,7 @@ export function initializeSession(
         const cancelled = await attempt.serverCancel;
         check(attempt);
         if (!cancelled.ok) throw new Error("Cleanup denied");
-        const ticketResponse = await mutation("/api/websocket-ticket");
+        const ticketResponse = await mutation("/api/websocket-ticket", options);
         check(attempt);
         if (!ticketResponse.ok) throw new Error("Fallback admission denied");
         const ticket: unknown = await ticketResponse.json();
@@ -437,6 +457,7 @@ export function initializeSession(
     }
     const servers = iceList(data.iceServers);
     start.disabled = false;
+    reasoning.disabled = false;
     status.textContent = data.anonymous
       ? "Public bot using its scoped bot credential. Start when ready."
       : "Signed in. Start when ready.";
@@ -447,6 +468,9 @@ export function initializeSession(
   }
   const endConversation = () => {
     void stopCurrent();
+  };
+  const enablePlayback = () => {
+    if (active) void playAudio(active);
   };
   const toggleMute = () => {
     const client = active?.client;
@@ -469,6 +493,7 @@ export function initializeSession(
   };
   // React rerenders must not replace these session-owned button handlers.
   end.addEventListener("click", endConversation);
+  enableAudio.addEventListener("click", enablePlayback);
   mute.addEventListener("click", toggleMute);
   logout.addEventListener("click", signOut);
   void initialize().catch(() => {
@@ -477,6 +502,7 @@ export function initializeSession(
   return () => {
     if (startConversation) start.removeEventListener("click", startConversation);
     end.removeEventListener("click", endConversation);
+    enableAudio.removeEventListener("click", enablePlayback);
     mute.removeEventListener("click", toggleMute);
     logout.removeEventListener("click", signOut);
     void stopCurrent();

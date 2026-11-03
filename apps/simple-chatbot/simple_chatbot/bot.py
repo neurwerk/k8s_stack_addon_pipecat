@@ -30,7 +30,7 @@ from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
-from simple_chatbot.config import Settings
+from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
 from simple_chatbot.timings import TurnTimings
 from simple_chatbot.websocket import BrowserSerializer
@@ -42,6 +42,7 @@ async def run_bot(
     http: httpx.AsyncClient,
     credential: str,
     notice: Callable[[str], None],
+    options: ConversationOptions | None = None,
 ) -> None:
     assert settings.stt and settings.tts
     transport: BaseTransport
@@ -93,7 +94,7 @@ async def run_bot(
             transport.input(),
             HTTPSTT(settings.stt, http, timings),
             user,
-            GatewayLLM(settings, http, credential, notice, timings),
+            GatewayLLM(settings, http, credential, notice, timings, options),
             HTTPTTS(settings.tts, http),
             transport.output(),
             assistant,

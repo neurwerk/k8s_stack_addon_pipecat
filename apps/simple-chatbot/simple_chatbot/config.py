@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from simple_chatbot.turn import temporary_credentials
 
 
+class ConversationOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    reasoning_effort: Literal["none", "low", "high", "max"] | None = None
+
+
 class SecretRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
     file: str

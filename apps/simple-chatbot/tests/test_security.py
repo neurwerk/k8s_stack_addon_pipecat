@@ -23,7 +23,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from simple_chatbot.auth import Auth
-from simple_chatbot.config import Settings
+from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.notices import MARKER, NoticeSplitter, SpeechControlFilter
 from simple_chatbot.server import create_app
 from simple_chatbot.services import GatewayLLM
@@ -324,6 +324,105 @@ class PageAdmissionTests(unittest.TestCase):
 
 
 class SessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reasoning_admission_validation_and_call_isolation(self):
+        config = settings(Path("unused"), protected=True)
+        app = create_app(config)
+        received = asyncio.Queue()
+
+        async def bot(connection, settings, http, credential, notice, options):
+            await received.put((credential, options.reasoning_effort))
+            await asyncio.Event().wait()
+
+        with (
+            patch("simple_chatbot.server.Auth.initialize", new=AsyncMock()),
+            patch("simple_chatbot.server.SmallWebRTCConnection", FakeConnection),
+        ):
+            async with app.router.lifespan_context(app):
+                app.state.run_bot = bot
+                transport = httpx.ASGITransport(app)
+                async with (
+                    httpx.AsyncClient(transport=transport, base_url=config.public_origin) as a,
+                    httpx.AsyncClient(transport=transport, base_url=config.public_origin) as b,
+                ):
+                    offer = {"sdp": "synthetic", "type": "offer"}
+                    endpoints = [
+                        ("/example/api/offer", lambda options: {**offer, "requestData": options}),
+                        ("/example/api/websocket-ticket", lambda options: options),
+                    ]
+                    for path, body in endpoints:
+                        self.assertEqual(
+                            (
+                                await a.post(path, json=body({"reasoning_effort": "none"}))
+                            ).status_code,
+                            401,
+                        )
+                    for client, token in ((a, "synthetic-a"), (b, "synthetic-b")):
+                        session = app.state.auth.create(
+                            token, token, time.time() + 300, signed_in=True
+                        )
+                        client.cookies.set(app.state.auth.cookie, session.id)
+                        client.headers.update(
+                            {"origin": config.public_origin, "x-csrf-token": session.csrf}
+                        )
+                    before = FakeConnection.counter
+                    for path, body in endpoints:
+                        for invalid in (
+                            {"reasoning_effort": "unknown"},
+                            {"reasoning_effort": 1},
+                            {"reasoning_effort": {}},
+                            {"model": "unapproved"},
+                            {"reasoning_effort": "none", "max_tokens": 9999},
+                        ):
+                            self.assertEqual(
+                                (await a.post(path, json=body(invalid))).status_code, 422
+                            )
+                        for headers in (
+                            {"origin": "https://wrong.example.com"},
+                            {"x-csrf-token": "wrong"},
+                        ):
+                            self.assertEqual(
+                                (
+                                    await a.post(
+                                        path,
+                                        json=body({"reasoning_effort": "none"}),
+                                        headers=headers,
+                                    )
+                                ).status_code,
+                                403,
+                            )
+                    conflicting = {
+                        **offer,
+                        "requestData": {"reasoning_effort": "none"},
+                        "request_data": {"reasoning_effort": "max"},
+                    }
+                    self.assertEqual(
+                        (await a.post("/example/api/offer", json=conflicting)).status_code, 422
+                    )
+                    self.assertEqual(FakeConnection.counter, before)
+                    self.assertTrue(received.empty())
+                    responses = await asyncio.gather(
+                        a.post(
+                            "/example/api/offer",
+                            json={**offer, "requestData": {"reasoning_effort": "none"}},
+                        ),
+                        b.post(
+                            "/example/api/offer",
+                            json={**offer, "request_data": {"reasoning_effort": "max"}},
+                        ),
+                    )
+                    self.assertEqual([r.status_code for r in responses], [200, 200])
+                    actual = {await asyncio.wait_for(received.get(), 1) for _ in range(2)}
+                    self.assertEqual(actual, {("synthetic-a", "none"), ("synthetic-b", "max")})
+                    await a.post("/example/api/cancel")
+                    self.assertEqual(
+                        (await a.post("/example/api/offer", json=offer)).status_code, 200
+                    )
+                    self.assertEqual(
+                        await asyncio.wait_for(received.get(), 1), ("synthetic-a", None)
+                    )
+                    for client in (a, b):
+                        await client.post("/example/api/cancel")
+
     async def test_optional_public_login_keeps_explicit_bot_credential_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             key = Path(temporary) / "credential"
@@ -335,7 +434,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             received = []
             started = asyncio.Event()
 
-            async def bot(connection, settings, http, credential, notice):
+            async def bot(connection, settings, http, credential, notice, options):
                 received.append(credential)
                 started.set()
                 await asyncio.Event().wait()
@@ -433,6 +532,47 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reasoning_payload_and_call_isolation(self):
+        config = settings(Path("unused"))
+        original = config.model_dump()
+        captured = []
+
+        def respond(request):
+            captured.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content='data: {"choices":[{"index":0,"delta":{"content":"Hello."},'
+                '"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            efforts = [None, "none", "low", "high", "max", None]
+            processors = [
+                GatewayLLM(
+                    config,
+                    http,
+                    "synthetic",
+                    lambda _: None,
+                    options=ConversationOptions(reasoning_effort=effort),
+                )
+                for effort in efforts
+            ]
+            for llm in processors:
+                llm.push_frame = AsyncMock()
+                await llm.process_frame(
+                    LLMContextFrame(LLMContext([{"role": "user", "content": "Hello"}])),
+                    FrameDirection.DOWNSTREAM,
+                )
+                self.assertTrue(llm.is_usable)
+        for effort, body in zip(efforts, captured, strict=True):
+            self.assertEqual(body["model"], config.model_id)
+            if effort is None:
+                self.assertNotIn("reasoning", body)
+            else:
+                self.assertEqual(body["reasoning"], {"effort": effort})
+        self.assertEqual(config.model_dump(), original)
+
     async def test_configured_api_base_url_and_redirect_credential_boundary(self):
         with tempfile.TemporaryDirectory() as temporary:
             data = settings(Path(temporary) / "unused").model_dump()
@@ -637,6 +777,62 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WebSocketTests(unittest.TestCase):
+    def test_reasoning_is_bound_to_fallback_ticket(self):
+        app = create_app(settings(Path("unused"), protected=True))
+
+        async def bot(connection, settings, http, credential, notice, options):
+            if isinstance(connection, FakeConnection):
+                await asyncio.Event().wait()
+            else:
+                await connection.receive_bytes()
+                await connection.send_json({"effort": options.reasoning_effort})
+
+        with (
+            patch("simple_chatbot.server.Auth.initialize", new=AsyncMock()),
+            patch("simple_chatbot.server.SmallWebRTCConnection", FakeConnection),
+            TestClient(app, base_url="https://voice.example.com") as client,
+        ):
+            app.state.run_bot = bot
+            owner = app.state.auth.create("synthetic-a", "a", time.time() + 300, signed_in=True)
+            other = app.state.auth.create("synthetic-b", "b", time.time() + 300, signed_in=True)
+            client.cookies.set(app.state.auth.cookie, owner.id)
+            headers = {"origin": "https://voice.example.com", "x-csrf-token": owner.csrf}
+            self.assertEqual(
+                client.post(
+                    "/example/api/offer",
+                    headers=headers,
+                    json={
+                        "sdp": "synthetic",
+                        "type": "offer",
+                        "requestData": {"reasoning_effort": "low"},
+                    },
+                ).status_code,
+                200,
+            )
+            self.assertEqual(client.post("/example/api/cancel", headers=headers).status_code, 200)
+            ticket = client.post(
+                "/example/api/websocket-ticket", headers=headers, json={"reasoning_effort": "low"}
+            ).json()["ticket"]
+            client.cookies.set(app.state.auth.cookie, other.id)
+            client.post(
+                "/example/api/websocket-ticket",
+                headers={**headers, "x-csrf-token": other.csrf},
+                json={"reasoning_effort": "max"},
+            ).raise_for_status()
+            client.cookies.set(app.state.auth.cookie, owner.id)
+            with client.websocket_connect(
+                "/example/api/websocket?ticket=" + ticket + "&reasoning_effort=max",
+                headers=headers,
+            ) as ws:
+                ws.send_bytes(b"synthetic")
+                self.assertEqual(ws.receive_json(), {"effort": "low"})
+            ticket = client.post("/example/api/websocket-ticket", headers=headers).json()["ticket"]
+            with client.websocket_connect(
+                "/example/api/websocket?ticket=" + ticket, headers=headers
+            ) as ws:
+                ws.send_bytes(b"synthetic")
+                self.assertEqual(ws.receive_json(), {"effort": None})
+
     def test_ticket_owner_origin_expiry_and_replay(self):
         with tempfile.TemporaryDirectory() as temporary:
             key = Path(temporary) / "key"
