@@ -77,9 +77,23 @@ async def bounded_sse(response: httpx.Response) -> AsyncIterator[dict]:
                     type(choice.get("index")) is not int
                     or choice["index"] != 0
                     or not isinstance(delta, dict)
-                    or finished
                 ):
                     raise ValueError("Invalid selected choice")
+                if finished:
+                    # OpenRouter repeats the successful terminal choice in its
+                    # final usage chunk. It is accounting, not another response.
+                    if (
+                        not isinstance(event.get("usage"), dict)
+                        or choice.get("finish_reason") != "stop"
+                        or delta.get("role") not in (None, "assistant")
+                        or any(
+                            key != "role" and value not in (None, "")
+                            for key, value in delta.items()
+                        )
+                    ):
+                        raise ValueError("Unexpected content after completion")
+                    yield event
+                    continue
                 if delta.get("role") not in (None, "assistant"):
                     raise ValueError("Invalid assistant role")
                 for field in ("content", "reasoning_content", "reasoning"):
@@ -204,7 +218,11 @@ class GatewayLLM(FrameProcessor):
         try:
             messages = frame.context.get_messages()
             if len(json.dumps(messages)) > self.settings.max_history_chars:
-                raise ValueError("Conversation limit reached")
+                await self.push_error(
+                    "Conversation limit reached. Start a new conversation.",
+                    force_treat_as_permanent=True,
+                )
+                return
             async with self.http.stream(
                 "POST",
                 self.settings.gateway_url,
@@ -240,10 +258,20 @@ class GatewayLLM(FrameProcessor):
                                 await self.push_frame(LLMTextFrame(clean))
             if not spoken:
                 raise ValueError("No assistant speech content")
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            # No upstream payloads or credentials in errors or logs.
+        except httpx.HTTPStatusError as error:
             await self.push_error(
-                "Model request failed or conversation limit reached", force_treat_as_permanent=True
+                f"Model request rejected (HTTP {error.response.status_code}).",
+                force_treat_as_permanent=True,
+            )
+        except httpx.HTTPError:
+            await self.push_error(
+                "Model connection failed or timed out. Please retry.", force_treat_as_permanent=True
+            )
+        except (ValueError, KeyError, TypeError):
+            # Exception details can contain upstream payloads or credentials.
+            await self.push_error(
+                "Model response was invalid or incomplete. Please retry.",
+                force_treat_as_permanent=True,
             )
         finally:
             splitter.finish()

@@ -88,6 +88,12 @@ function App() {
               >
                 Loading configuration…
               </p>
+              <p
+                id="call-error"
+                role="alert"
+                hidden
+                className="mt-2 max-w-xl text-sm text-destructive"
+              />
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <MicrophoneControl />

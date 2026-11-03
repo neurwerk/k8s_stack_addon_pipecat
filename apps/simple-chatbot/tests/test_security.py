@@ -486,6 +486,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 }
             ]
             deltas.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            deltas.append({**deltas[-1], "usage": {"completion_tokens": 20}})
             payload = "".join("data: " + json.dumps(delta) + "\n\n" for delta in deltas)
             payload += "data: [DONE]\n\n"
 
@@ -507,6 +508,13 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     if isinstance(call.args[0], LLMTextFrame)
                 ]
                 self.assertEqual("".join(emitted), "Hello. Again.")
+                self.assertTrue(llm.is_usable)
+                self.assertFalse(
+                    any(
+                        isinstance(call.args[0], ErrorFrame)
+                        for call in llm.push_frame.await_args_list
+                    )
+                )
                 self.assertEqual(notices, ["Report"])
                 self.assertNotIn("Report", json.dumps(context.get_messages()))
                 self.assertEqual(captured[0].url.path, "/bindings/voice/v1/chat/completions")
@@ -547,6 +555,47 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     llm.push_frame.await_args_list[-2].args[1], FrameDirection.UPSTREAM
                 )
+
+    async def test_model_errors_are_classified_without_exposing_upstream_details(self):
+        sensitive = "synthetic-private-response-and-credential"
+        invalid = "Model response was invalid or incomplete. Please retry."
+        cases = [
+            (403, sensitive.encode(), "Model request rejected (HTTP 403)."),
+            (429, sensitive.encode(), "Model request rejected (HTTP 429)."),
+            (httpx.ConnectError, b"", "Model connection failed or timed out. Please retry."),
+            (httpx.ReadError, b"", "Model connection failed or timed out. Please retry."),
+            (200, b'data: {"choices":null}\n\n', invalid),
+            (200, ("data: " + sensitive + "\n\n").encode(), invalid),
+            (200, b"data: \xff" + sensitive.encode(), invalid),
+            (200, ('data: {"error":{"message":"' + sensitive + '"}}\n\n').encode(), invalid),
+        ]
+        for outcome, payload, expected in cases:
+            with self.subTest(outcome=outcome, payload=payload):
+                calls = []
+
+                def respond(request, calls=calls, outcome=outcome, payload=payload):
+                    calls.append(request)
+                    if isinstance(outcome, type):
+                        raise outcome(sensitive, request=request)
+                    return httpx.Response(
+                        outcome, content=payload, headers={"content-type": "text/event-stream"}
+                    )
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+                    llm = GatewayLLM(settings(Path("unused")), http, sensitive, lambda _: None)
+                    llm.push_frame = AsyncMock()
+                    await llm.process_frame(
+                        LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM
+                    )
+                errors = [
+                    call.args[0]
+                    for call in llm.push_frame.await_args_list
+                    if isinstance(call.args[0], ErrorFrame)
+                ]
+                self.assertEqual([error.error for error in errors], [expected])
+                self.assertNotIn(sensitive, str(errors))
+                self.assertFalse(llm.is_usable)
+                self.assertEqual(len(calls), 1)
 
     async def test_cancellation_closes_gateway_stream(self):
         started, closed = asyncio.Event(), asyncio.Event()

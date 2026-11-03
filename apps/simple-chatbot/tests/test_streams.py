@@ -70,6 +70,36 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0], first)
         self.assertEqual(result[-1]["choices"], [])
 
+    async def test_openrouter_terminal_usage_is_accounting_not_new_content(self):
+        terminal = event("", finish="stop")
+        terminal["choices"][0]["delta"]["role"] = "assistant"
+        usage = {**terminal, "usage": {"completion_tokens": 3}}
+        response = httpx.Response(
+            200,
+            stream=Chunks([sse(event("Hello"), terminal, usage)]),
+            headers={"content-type": "text/event-stream"},
+        )
+        self.assertEqual(
+            [value async for value in bounded_sse(response)], [event("Hello"), terminal, usage]
+        )
+        for delta in (
+            {"content": "late"},
+            {"reasoning_content": "late"},
+            {"reasoning": "late"},
+            {"tool_calls": [{"function": {"name": "late"}}]},
+        ):
+            bad_usage = {
+                "choices": [{"index": 0, "delta": delta, "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 3},
+            }
+            with self.subTest(delta=delta), self.assertRaises(ValueError):
+                response = httpx.Response(
+                    200,
+                    content=sse(event(), terminal, bad_usage),
+                    headers={"content-type": "text/event-stream"},
+                )
+                _ = [value async for value in bounded_sse(response)]
+
     async def test_malformed_empty_incomplete_and_unsuccessful_completions_fail(self):
         payloads = [
             sse(),
@@ -85,6 +115,12 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             sse({"choices": []}),
             sse({"error": {"message": "synthetic"}}),
             sse(event(), event(None, finish="stop"), event("late")),
+            sse(event(), event(None, finish="stop"), event("", finish="stop")),
+            sse(
+                event(),
+                event(None, finish="stop"),
+                {**event("", finish="length"), "usage": {}},
+            ),
         ]
         for payload in payloads:
             response = httpx.Response(

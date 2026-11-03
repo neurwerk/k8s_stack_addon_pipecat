@@ -45,6 +45,7 @@ export function initializeSession(
   onClient: (client: PipecatClient) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
+  const callError = element("call-error", HTMLParagraphElement);
   const start = element("connect", HTMLButtonElement);
   const end = element("disconnect", HTMLButtonElement);
   const mute = element("mute", HTMLButtonElement);
@@ -74,6 +75,13 @@ export function initializeSession(
   }
   function check(attempt: Attempt): void {
     if (!owns(attempt)) throw new Cancelled();
+  }
+  function showError(attempt: Attempt, message: string): void {
+    attempt.serviceError = true;
+    // Keep the cause when closing the transport reports a second error.
+    if (!callError.hidden) return;
+    callError.textContent = message.slice(0, 512);
+    callError.hidden = false;
   }
   function mutation(path: string): Promise<Response> {
     return fetch(`${base}${path}`, {
@@ -169,9 +177,10 @@ export function initializeSession(
           if (sender && sender.track !== track) {
             void sender.replaceTrack(track).catch(() => {
               if (current()) {
-                attempt.serviceError = true;
-                status.textContent =
-                  "Microphone change failed. End the call and retry.";
+                showError(
+                  attempt,
+                  "Microphone change failed. End the call and retry.",
+                );
               }
             });
           }
@@ -187,9 +196,16 @@ export function initializeSession(
       onDisconnected: () => {
         if (current() && !attempt.connecting) void stopCurrent();
       },
-      onError: () => {
+      onError: (message: unknown) => {
         if (current()) {
-          attempt.serviceError = true;
+          const data =
+            object(message) && object(message.data) ? message.data : undefined;
+          showError(
+            attempt,
+            typeof data?.error === "string"
+              ? data.error
+              : "Call failed. End the call and retry.",
+          );
           status.textContent = "Call failed. End the call and retry.";
         }
       },
@@ -234,6 +250,8 @@ export function initializeSession(
       transport: 0,
     };
     active = attempt;
+    callError.textContent = "";
+    callError.hidden = true;
     start.disabled = true;
     end.disabled = false;
     status.textContent = "Connecting…";
@@ -319,6 +337,7 @@ export function initializeSession(
         );
       }
       check(attempt);
+      if (attempt.serviceError) throw new Error("Call failed during connection");
       attempt.connecting = false;
       mute.disabled = false;
       status.textContent = "Connected. You can speak now.";
@@ -336,8 +355,9 @@ export function initializeSession(
         /* Keep Start disabled until cleanup is acknowledged. */
       }
       if (!active && !(error instanceof Cancelled))
-        status.textContent =
-          "Could not connect. Check microphone permission or sign in again.";
+        status.textContent = attempt.serviceError
+          ? "Call failed. Start a new conversation to retry."
+          : "Could not connect. Check microphone permission or sign in again.";
     }
   }
   async function initialize(): Promise<void> {

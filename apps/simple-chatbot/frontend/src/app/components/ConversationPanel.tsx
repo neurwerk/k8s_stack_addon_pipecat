@@ -5,7 +5,6 @@ import { useState } from "react";
 
 import { Conversation } from "@/components/pipecat/conversation";
 import type { TextRenderMode } from "@/components/pipecat/conversation-message";
-import { TextInput } from "@/components/pipecat/text-input";
 import {
   Select,
   SelectContent,
@@ -53,13 +52,9 @@ export function ConversationPanel({ className }: { className?: string }) {
       </PanelHeader>
       <Conversation textRenderMode={renderMode} className="min-h-0 flex-1" />
       <div className="shrink-0 p-3">
-        <TextInput
-          disabled
-          placeholder="Text input is not enabled by this app's voice-only protocol"
-        />
         <p className="mt-2 text-xs text-muted-foreground">
-          Voice conversations only. Browser text commands are not accepted by
-          this app.
+          Speak after starting a conversation. Your words are sent automatically
+          when you finish speaking.
         </p>
       </div>
     </Panel>
