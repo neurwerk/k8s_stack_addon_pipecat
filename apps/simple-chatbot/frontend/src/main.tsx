@@ -5,7 +5,10 @@ import {
   PipecatClientProvider,
   usePipecatClientTransportState,
 } from "@pipecat-ai/client-react";
-import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
+import {
+  SmallWebRTCTransport,
+  WavMediaManager,
+} from "@pipecat-ai/small-webrtc-transport";
 import { BotIcon, ShieldCheckIcon } from "lucide-react";
 
 import { UserAudioControl } from "@/components/pipecat/user-audio-control";
@@ -32,7 +35,9 @@ function App() {
   const [client, setClient] = useState(
     () =>
       new PipecatClient({
-        transport: new SmallWebRTCTransport(),
+        transport: new SmallWebRTCTransport({
+          mediaManager: new WavMediaManager(),
+        }),
         enableMic: false,
         enableCam: false,
       }),

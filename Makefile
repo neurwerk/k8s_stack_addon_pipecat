@@ -4,7 +4,7 @@ BASE ?=
 ADDON_BASE ?= $(BASE)
 TOOLING := uv run --locked --project tooling
 TOOLING_IMAGE := ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling
-CHARTS := $(sort $(shell find charts -name Chart.yaml -printf '%h\n'))
+CHARTS := $(sort $(shell find charts -name Chart.yaml -exec dirname {} \;))
 
 .PHONY: check addon-check lint schema compose static test build image-build tooling-check tooling-integration tooling-build
 check: tooling-check addon-check lint schema compose static test build

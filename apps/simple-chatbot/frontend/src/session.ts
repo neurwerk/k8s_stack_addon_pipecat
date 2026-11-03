@@ -3,7 +3,10 @@ import {
   PipecatClient,
   TransportStartError,
 } from "@pipecat-ai/client-js";
-import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
+import {
+  SmallWebRTCTransport,
+  WavMediaManager,
+} from "@pipecat-ai/small-webrtc-transport";
 
 function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
   const node = document.getElementById(id);
@@ -143,7 +146,7 @@ export function initializeSession(
       if (timer) clearTimeout(timer);
     }
   }
-  function callbacks(attempt: Attempt) {
+  function callbacks(attempt: Attempt, webrtc?: SmallWebRTCTransport) {
     const transport = ++attempt.transport;
     const current = () => owns(attempt) && attempt.transport === transport;
     return {
@@ -154,6 +157,25 @@ export function initializeSession(
         track: MediaStreamTrack,
         participant?: { local?: boolean },
       ) => {
+        if (current() && participant?.local && track.kind === "audio" && webrtc) {
+          // The pinned transport only wires track replacement for its default
+          // Daily manager. Its peer connection is omitted from the SDK typings.
+          const { pc } = webrtc as SmallWebRTCTransport & {
+            pc?: RTCPeerConnection | null;
+          };
+          const sender = pc
+            ?.getSenders()
+            .find((item) => item.track?.kind === "audio");
+          if (sender && sender.track !== track) {
+            void sender.replaceTrack(track).catch(() => {
+              if (current()) {
+                attempt.serviceError = true;
+                status.textContent =
+                  "Microphone change failed. End the call and retry.";
+              }
+            });
+          }
+        }
         if (current() && !participant?.local && track.kind === "audio") {
           audio.srcObject = new MediaStream([track]);
           void audio.play().catch(() => {
@@ -225,11 +247,15 @@ export function initializeSession(
       });
       permission.getTracks().forEach((track) => track.stop());
       check(attempt);
+      const webrtc = new SmallWebRTCTransport({
+        iceServers: servers,
+        mediaManager: new WavMediaManager(),
+      });
       attempt.client = new PipecatClient({
-        transport: new SmallWebRTCTransport({ iceServers: servers }),
+        transport: webrtc,
         enableMic: true,
         enableCam: false,
-        callbacks: callbacks(attempt),
+        callbacks: callbacks(attempt, webrtc),
       });
       onClient(attempt.client);
       try {
@@ -272,6 +298,8 @@ export function initializeSession(
           "WebRTC unavailable. Connecting using HTTPS WebSocket audio…";
         attempt.client = new PipecatClient({
           transport: new WebSocketTransport({
+            // Match the server's 16 kHz input and the WAV player's 24 kHz output.
+            mediaManager: new WavMediaManager(512, 16000),
             serializer: new ProtobufFrameSerializer(),
             recorderSampleRate: 16000,
             playerSampleRate: 24000,
