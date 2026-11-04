@@ -2,6 +2,7 @@
 
 import { MessagesSquareIcon } from "lucide-react";
 import { useState } from "react";
+import type { ConversationMessage } from "@pipecat-ai/client-react";
 
 import { Conversation } from "@/components/pipecat/conversation";
 import type { TextRenderMode } from "@/components/pipecat/conversation-message";
@@ -15,6 +16,7 @@ import {
 
 import { Panel, PanelHeader, PanelTitle } from "./Panel";
 import { ProtectionNotices } from "./ProtectionNotices";
+import type { ChatError } from "@/session";
 
 const RENDER_MODES: { value: TextRenderMode; label: string }[] = [
   { value: "karaoke", label: "Karaoke" },
@@ -25,13 +27,21 @@ const RENDER_MODES: { value: TextRenderMode; label: string }[] = [
 export function ConversationPanel({
   model,
   notices,
+  errors,
   className,
 }: {
   model: string;
   notices: string[];
+  errors: ChatError[];
   className?: string;
 }) {
   const [renderMode, setRenderMode] = useState<TextRenderMode>("karaoke");
+  const localMessages: ConversationMessage[] = errors.map(({ text, createdAt }) => ({
+    role: "system",
+    createdAt,
+    final: true,
+    parts: [{ text, createdAt, final: true }],
+  }));
 
   return (
     <Panel aria-label="Conversation" className={className}>
@@ -61,6 +71,8 @@ export function ConversationPanel({
       </PanelHeader>
       <Conversation
         assistantLabel={model}
+        systemLabel="Error"
+        localMessages={localMessages}
         textRenderMode={renderMode}
         className="min-h-0 flex-1"
       />

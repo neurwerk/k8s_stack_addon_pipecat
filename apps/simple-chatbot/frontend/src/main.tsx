@@ -16,8 +16,9 @@ import { ConnectButtonView } from "@/components/pipecat/connect-button";
 import { Button } from "@/components/ui/button";
 import { ConversationPanel } from "@/app/components/ConversationPanel";
 import { TimingPanel } from "@/app/components/TimingPanel";
+import { version } from "../package.json";
 import type { TurnTiming } from "./timings";
-import { initializeSession } from "./session";
+import { initializeSession, type ChatError } from "./session";
 import "./app/globals.css";
 import "./style.css";
 
@@ -37,6 +38,7 @@ function App() {
   const [timings, setTimings] = useState<TurnTiming[]>([]);
   const [speaking, setSpeaking] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
+  const [errors, setErrors] = useState<ChatError[]>([]);
   // No device initialization before an explicit Start click and admission check.
   const [client, setClient] = useState(
     () =>
@@ -48,7 +50,7 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices), []);
+  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors), []);
 
   return (
     <PipecatClientProvider client={client}>
@@ -101,14 +103,13 @@ function App() {
                 className="mt-2 max-w-xl text-sm text-destructive"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="flex flex-col gap-1 text-sm">
+            <div className="flex flex-wrap items-center gap-3 lg:flex-nowrap">
+              <label className="flex items-center gap-2 whitespace-nowrap text-sm has-[:disabled]:text-muted-foreground">
                 Reasoning
                 <select
                   id="reasoning"
                   defaultValue=""
                   disabled
-                  aria-describedby="reasoning-help"
                   className="rounded-md border border-input bg-background px-3 py-2 focus-visible:outline-2 disabled:opacity-50"
                 >
                   <option value="">Model default</option>
@@ -116,6 +117,18 @@ function App() {
                   <option value="low">Low</option>
                   <option value="high">High</option>
                   <option value="max">Max</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 whitespace-nowrap text-sm has-[:disabled]:text-muted-foreground">
+                Connection
+                <select
+                  id="transport"
+                  defaultValue="webrtc"
+                  disabled
+                  className="rounded-md border border-input bg-background px-3 py-2 focus-visible:outline-2 disabled:opacity-50"
+                >
+                  <option value="webrtc">WebRTC</option>
+                  <option value="websocket">HTTPS WebSocket</option>
                 </select>
               </label>
               <MicrophoneControl />
@@ -138,15 +151,12 @@ function App() {
               </Button>
             </div>
           </div>
-          <p id="reasoning-help" className="mt-3 text-sm text-muted-foreground">
-            Applies to a new conversation. Off usually gives faster replies.
-          </p>
           <audio id="audio" hidden />
         </section>
-        <ConversationPanel model={model} notices={notices} className="min-h-96 flex-1" />
+        <ConversationPanel model={model} notices={notices} errors={errors} className="min-h-96 flex-1" />
         <TimingPanel timings={timings} speaking={speaking} />
         <footer className="text-center text-xs text-muted-foreground">
-          Built with Pipecat and Pipecat UI
+          Demo Assistant v{version} · Built with Pipecat and Pipecat UI
         </footer>
       </main>
     </PipecatClientProvider>

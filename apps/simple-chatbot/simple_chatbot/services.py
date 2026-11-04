@@ -230,9 +230,6 @@ class GatewayLLM(FrameProcessor):
         if timing:
             start.metadata["turn_timing"] = timing
         await self.push_frame(start)
-        splitter = NoticeSplitter()
-        speech = SpeechControlFilter()
-        spoken = False
         try:
             messages = frame.context.get_messages()
             if len(json.dumps(messages)) > self.settings.max_history_chars:
@@ -243,63 +240,81 @@ class GatewayLLM(FrameProcessor):
                     force_treat_as_permanent=True,
                 )
                 return
-            if timing:
-                timing.llm_started = time.monotonic()
-            async with self.http.stream(
-                "POST",
-                self.settings.gateway_url,
-                follow_redirects=False,
-                headers={
-                    "Authorization": "Bearer " + self.credential,
-                },
-                json={
-                    "model": self.settings.model_id,
-                    "messages": messages,
-                    "stream": True,
-                    "max_tokens": 512,
-                    **(
-                        {"reasoning": {"effort": self.options.reasoning_effort}}
-                        if self.options.reasoning_effort is not None
-                        else {}
-                    ),
-                },
-            ) as response:
-                response.raise_for_status()
-                content_size = 0
-                async for event in bounded_sse(response):
-                    if "error" in event:
-                        raise ValueError("Gateway rejected request")
-                    for choice in event.get("choices", []):
-                        if choice.get("index", 0) != 0:
-                            continue
-                        delta = choice.get("delta", {})
-                        # Reasoning, tool calls, function calls and metadata are never speech.
-                        text = delta.get("content")
-                        if isinstance(text, str):
-                            content_size += len(text)
-                            if content_size > 65536:
-                                raise ValueError("Content limit exceeded")
-                            clean = speech.feed(splitter.feed(text))
-                            if clean:
-                                if timing and clean.strip():
-                                    await timing.first_text()
-                                spoken |= bool(clean.strip())
-                                await self.push_frame(LLMTextFrame(clean))
-            if not spoken:
-                raise ValueError("No assistant speech content")
-        except httpx.HTTPStatusError as error:
-            if timing:
-                await timing.finish("failed")
-            await self.push_error(
-                f"Model request rejected (HTTP {error.response.status_code}).",
-                force_treat_as_permanent=True,
-            )
-        except httpx.HTTPError:
-            if timing:
-                await timing.finish("failed")
-            await self.push_error(
-                "Model connection failed or timed out. Please retry.", force_treat_as_permanent=True
-            )
+            for attempt in range(2):
+                splitter = NoticeSplitter()
+                speech = SpeechControlFilter()
+                spoken = emitted = retrying = False
+                try:
+                    if timing:
+                        timing.llm_started = time.monotonic()
+                    async with self.http.stream(
+                        "POST",
+                        self.settings.gateway_url,
+                        follow_redirects=False,
+                        headers={"Authorization": "Bearer " + self.credential},
+                        json={
+                            "model": self.settings.model_id,
+                            "messages": messages,
+                            "stream": True,
+                            "max_tokens": 512,
+                            **(
+                                {"reasoning": {"effort": self.options.reasoning_effort}}
+                                if self.options.reasoning_effort is not None
+                                else {}
+                            ),
+                        },
+                    ) as response:
+                        response.raise_for_status()
+                        content_size = 0
+                        async for event in bounded_sse(response):
+                            for choice in event.get("choices", []):
+                                delta = choice.get("delta", {})
+                                # Reasoning, tool calls and metadata are never speech.
+                                text = delta.get("content")
+                                if isinstance(text, str):
+                                    content_size += len(text)
+                                    if content_size > 65536:
+                                        raise ValueError("Content limit exceeded")
+                                    clean = speech.feed(splitter.feed(text))
+                                    if clean:
+                                        if timing and clean.strip():
+                                            await timing.first_text()
+                                        spoken |= bool(clean.strip())
+                                        emitted = True
+                                        await self.push_frame(LLMTextFrame(clean))
+                    if not spoken:
+                        raise ValueError("No assistant speech content")
+                    break
+                except httpx.HTTPStatusError as error:
+                    if timing:
+                        await timing.finish("failed")
+                    await self.push_error(
+                        f"Model request rejected (HTTP {error.response.status_code}).",
+                        force_treat_as_permanent=True,
+                    )
+                    break
+                except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+                    if attempt == 0 and not emitted:
+                        retrying = True
+                        continue
+                    if timing:
+                        await timing.finish("failed")
+                    # Exception details can contain upstream payloads or credentials.
+                    await self.push_error(
+                        "Model connection failed or timed out. Please retry."
+                        if isinstance(error, httpx.HTTPError)
+                        else "Model response was invalid or incomplete. Please retry.",
+                        category=(
+                            ErrorCategory.CONNECTIVITY
+                            if isinstance(error, httpx.HTTPError)
+                            else ErrorCategory.APPLICATION
+                        ),
+                    )
+                    break
+                finally:
+                    splitter.finish()
+                    if splitter.notice and not retrying:
+                        self.notice(splitter.notice)
         except (ValueError, KeyError, TypeError):
             if timing:
                 await timing.finish("failed")
@@ -313,9 +328,6 @@ class GatewayLLM(FrameProcessor):
                 await timing.finish("interrupted")
             raise
         finally:
-            splitter.finish()
-            if splitter.notice:
-                self.notice(splitter.notice)
             await self.push_frame(LLMFullResponseEndFrame())
 
 

@@ -129,6 +129,8 @@ export interface ConversationProps extends Omit<
   noFunctionCalls?: boolean;
   /** Controls how bot message text is rendered. */
   textRenderMode?: TextRenderMode;
+  /** Local notices shown in the same timeline, never sent to the model. */
+  localMessages?: ConversationMessage[];
 }
 
 /**
@@ -139,6 +141,7 @@ export function Conversation({
   noFunctionCalls = false,
   textRenderMode,
   aggregationMetadata,
+  localMessages = [],
   ...props
 }: ConversationProps) {
   const transportState = usePipecatClientTransportState();
@@ -157,10 +160,13 @@ export function Conversation({
 
   const messages = useMemo(
     () =>
-      noFunctionCalls
-        ? allMessages.filter((m) => m.role !== "function_call")
-        : allMessages,
-    [allMessages, noFunctionCalls],
+      [
+        ...(noFunctionCalls
+          ? allMessages.filter((m) => m.role !== "function_call")
+          : allMessages),
+        ...localMessages,
+      ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [allMessages, localMessages, noFunctionCalls],
   );
 
   const isConnecting =
