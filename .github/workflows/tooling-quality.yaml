@@ -15,7 +15,7 @@ permissions:
   contents: read
 env:
   # Reviewed merged Base source for coordinated authentication cutover validation.
-  BASE_REF: 66a9f7545810cce9167ced68ace62ec7a7d08067
+  BASE_REF: e1b9c226c293fb99b2bc0da108d397a157a55d7f
 jobs:
   quality:
     runs-on: ubuntu-latest
