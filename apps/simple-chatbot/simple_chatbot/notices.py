@@ -1,6 +1,7 @@
 """Separate the gateway's appended report, including split streaming markers."""
 
-MARKER = "\n\n---\nPII Engine Notice\n"
+MARKER = "\n\n---\nPII protection notice — powered by neurwerk\n"
+MARKERS = (MARKER, "\n\n---\nPII Engine Notice\n")
 
 
 class SpeechControlFilter:
@@ -58,17 +59,22 @@ class NoticeSplitter:
             self.notice = (self.notice + text)[:32768]
             return ""
         self.pending += text
-        if MARKER in self.pending:
-            speech, self.notice = self.pending.split(MARKER, 1)
+        matches = [
+            (self.pending.index(marker), marker) for marker in MARKERS if marker in self.pending
+        ]
+        if matches:
+            _, marker = min(matches)
+            speech, self.notice = self.pending.split(marker, 1)
             self.notice = self.notice[:32768]
             self.pending = ""
             self.in_notice = True
             return speech
         # Only withhold a possible marker prefix, not an arbitrary chunk length.
         keep = 0
-        for size in range(1, min(len(self.pending), len(MARKER) - 1) + 1):
-            if self.pending.endswith(MARKER[:size]):
-                keep = size
+        for marker in MARKERS:
+            for size in range(1, min(len(self.pending), len(marker) - 1) + 1):
+                if self.pending.endswith(marker[:size]):
+                    keep = max(keep, size)
         result = self.pending[:-keep] if keep else self.pending
         self.pending = self.pending[-keep:] if keep else ""
         return result

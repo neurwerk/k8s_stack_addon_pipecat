@@ -7,7 +7,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from pipecat.frames.frames import AggregatedTextFrame, ErrorFrame, TTSAudioRawFrame
+from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    EndFrame,
+    ErrorFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    TTSAudioRawFrame,
+    TTSTextFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.workers.runner import WorkerRunner
 from pyee.asyncio import AsyncIOEventEmitter
 
 from simple_chatbot.config import Speech
@@ -258,9 +270,16 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertTrue(self.tts.is_usable)
 
-    async def test_real_synthesis_failures_remain_safe_errors(self):
+    async def test_synthesis_errors_are_sanitized_and_only_configuration_is_permanent(self):
         private = "synthetic-private-upstream-detail"
-        for status, payload in ((500, private.encode()), (200, b"")):
+        for status, payload in (
+            (500, private.encode()),
+            (200, b""),
+            (401, private.encode()),
+            (403, private.encode()),
+            (404, private.encode()),
+            (422, private.encode()),
+        ):
             with self.subTest(status=status):
                 self.response = httpx.Response(
                     status, content=payload, headers={"content-type": "audio/pcm"}
@@ -278,7 +297,108 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([error.error for error in errors], ["Speech synthesis failed"])
                 self.assertTrue(all(error.exception is None for error in errors))
                 self.assertNotIn(private, str(errors))
-                self.assertFalse(tts.is_usable)
+                self.assertEqual(tts.is_usable, status in (500, 200))
+
+    async def test_failed_streams_and_empty_responses_do_not_end_the_live_pipeline(self):
+        class Collector(FrameProcessor):
+            def __init__(self):
+                super().__init__()
+                self.frames = []
+                self.audio_seen = asyncio.Event()
+                self.turn_finished = asyncio.Event()
+
+            async def process_frame(self, frame, direction):
+                await super().process_frame(frame, direction)
+                if direction == FrameDirection.DOWNSTREAM:
+                    self.frames.append(frame)
+                    if isinstance(frame, TTSAudioRawFrame):
+                        self.audio_seen.set()
+                    if isinstance(frame, LLMFullResponseEndFrame):
+                        self.turn_finished.set()
+                await self.push_frame(frame, direction)
+
+        collector = Collector()
+        partial = b"\x01\x02" * 32
+        complete = b"\x03\x04" * 32
+
+        class Broken(httpx.AsyncByteStream):
+            def __init__(self, after_audio):
+                self.after_audio = after_audio
+
+            async def __aiter__(self):
+                if self.after_audio:
+                    yield partial
+                    await asyncio.wait_for(collector.audio_seen.wait(), 2)
+                raise httpx.RemoteProtocolError("synthetic-private-upstream-detail")
+
+        failures = [
+            httpx.Response(500),
+            httpx.Response(200, content=b"", headers={"content-type": "audio/pcm"}),
+            httpx.Response(200, stream=Broken(False), headers={"content-type": "audio/pcm"}),
+            httpx.Response(200, stream=Broken(True), headers={"content-type": "audio/pcm"}),
+            httpx.Response(422, json={"detail": {"code": "no_speakable_text"}}),
+        ]
+        responses = iter(
+            failures
+            + [httpx.Response(200, content=complete, headers={"content-type": "audio/pcm"})]
+        )
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            return next(responses)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            tts = HTTPTTS(self.tts.speech, http)
+            worker = PipelineWorker(
+                Pipeline([tts, collector]),
+                enable_rtvi=False,
+                enable_turn_tracking=False,
+                idle_timeout_secs=None,
+                processor_unusable_policy=ProcessorUnusablePolicy.CANCEL,
+            )
+            errors = []
+
+            @worker.event_handler("on_pipeline_error")
+            async def on_error(worker, frame):
+                errors.append(frame)
+
+            runner = WorkerRunner(handle_sigint=False)
+            await runner.add_workers(worker)
+            running = asyncio.create_task(runner.run())
+            try:
+                for index in range(len(failures) + 1):
+                    collector.turn_finished.clear()
+                    await worker.queue_frames(
+                        [
+                            LLMFullResponseStartFrame(),
+                            AggregatedTextFrame(f"Sentence {index}.", "sentence"),
+                            LLMFullResponseEndFrame(),
+                        ]
+                    )
+                    await asyncio.wait_for(collector.turn_finished.wait(), 3)
+                    self.assertTrue(tts.is_usable)
+                    self.assertFalse(running.done())
+                await worker.queue_frame(EndFrame())
+                await asyncio.wait_for(running, 3)
+            finally:
+                await runner.cancel()
+                if not running.done():
+                    await asyncio.wait_for(running, 3)
+
+        self.assertEqual(len(requests), 6)  # No retry of already emitted audio.
+        self.assertEqual(
+            b"".join(
+                frame.audio for frame in collector.frames if isinstance(frame, TTSAudioRawFrame)
+            ),
+            partial + complete,
+        )
+        self.assertEqual(
+            [frame.text for frame in collector.frames if isinstance(frame, TTSTextFrame)],
+            ["Sentence 5."],
+        )
+        self.assertEqual(sum(e.error == "Speech synthesis failed" for e in errors), 5)
+        self.assertTrue(all(error.exception is None for error in errors))
 
 
 class Channel(AsyncIOEventEmitter):

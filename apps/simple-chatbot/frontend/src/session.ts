@@ -47,6 +47,7 @@ export function initializeSession(
   onModel: (model: string) => void,
   onTimings: (timings: TurnTiming[]) => void,
   onSpeaking: (speaking: boolean) => void,
+  onNotices: (notices: string[]) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -70,11 +71,14 @@ export function initializeSession(
     connecting: boolean;
     mediaConnected: boolean;
     serviceError: boolean;
+    recoverableError?: boolean;
     transport: number;
     polling?: ReturnType<typeof setInterval>;
     serverCancel?: Promise<Response>;
     stopped?: Promise<void>;
     timings: TurnTiming[];
+    notices: string[];
+    pollingNotices?: boolean;
   }
   class Cancelled extends Error {}
   class MediaTimeout extends Error {}
@@ -201,7 +205,14 @@ export function initializeSession(
         onTimings(attempt.timings);
       },
       onBotStartedSpeaking: () => {
-        if (current()) onSpeaking(true);
+        if (current()) {
+          onSpeaking(true);
+          if (attempt.recoverableError) {
+            attempt.recoverableError = false;
+            callError.hidden = true;
+            status.textContent = "Connected.";
+          }
+        }
       },
       onBotStoppedSpeaking: () => {
         if (current()) onSpeaking(false);
@@ -245,6 +256,14 @@ export function initializeSession(
         if (current()) {
           const data =
             object(message) && object(message.data) ? message.data : undefined;
+          if (data?.fatal === false && !attempt.serviceError) {
+            attempt.recoverableError = true;
+            callError.textContent = typeof data.error === "string"
+              ? data.error.slice(0, 512) : "A response failed.";
+            callError.hidden = false;
+            status.textContent = "Response error. You can keep talking while connected.";
+            return;
+          }
           showError(
             attempt,
             typeof data?.error === "string"
@@ -257,6 +276,8 @@ export function initializeSession(
     };
   }
   async function pollNotices(attempt: Attempt): Promise<void> {
+    if (attempt.pollingNotices) return;
+    attempt.pollingNotices = true;
     try {
       const response = await fetch(`${base}/api/notices`);
       if (!owns(attempt)) return;
@@ -274,16 +295,13 @@ export function initializeSession(
           typeof entry.text !== "string"
         )
           continue;
-        const report = document.createElement("pre");
-        report.textContent = entry.text;
-        const container = element("notices", HTMLDivElement);
-        container.hidden = false;
-        container.append(report);
-        while (container.children.length > 8)
-          container.firstElementChild?.remove();
+        attempt.notices = [...attempt.notices, entry.text.slice(0, 32768)].slice(-8);
       }
+      onNotices(attempt.notices);
     } catch {
       if (owns(attempt)) status.textContent = "Connection interrupted.";
+    } finally {
+      attempt.pollingNotices = false;
     }
   }
   async function connect(servers: RTCIceServer[]): Promise<void> {
@@ -297,10 +315,12 @@ export function initializeSession(
       serviceError: false,
       transport: 0,
       timings: [],
+      notices: [],
     };
     active = attempt;
     enableAudio.hidden = true;
     onTimings([]);
+    onNotices([]);
     onSpeaking(false);
     callError.textContent = "";
     callError.hidden = true;

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 
 import { Panel, PanelHeader, PanelTitle } from "./Panel";
+import { ProtectionNotices } from "./ProtectionNotices";
 
 const RENDER_MODES: { value: TextRenderMode; label: string }[] = [
   { value: "karaoke", label: "Karaoke" },
@@ -23,9 +24,11 @@ const RENDER_MODES: { value: TextRenderMode; label: string }[] = [
 
 export function ConversationPanel({
   model,
+  notices,
   className,
 }: {
   model: string;
+  notices: string[];
   className?: string;
 }) {
   const [renderMode, setRenderMode] = useState<TextRenderMode>("karaoke");
@@ -61,6 +64,7 @@ export function ConversationPanel({
         textRenderMode={renderMode}
         className="min-h-0 flex-1"
       />
+      <ProtectionNotices notices={notices} />
     </Panel>
   );
 }

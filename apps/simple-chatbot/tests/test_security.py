@@ -24,7 +24,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from simple_chatbot.auth import Auth
 from simple_chatbot.config import ConversationOptions, Settings
-from simple_chatbot.notices import MARKER, NoticeSplitter, SpeechControlFilter
+from simple_chatbot.notices import NoticeSplitter, SpeechControlFilter
 from simple_chatbot.server import create_app
 from simple_chatbot.services import GatewayLLM
 from simple_chatbot.websocket import BrowserSerializer
@@ -54,16 +54,30 @@ def settings(key: Path, *, protected=False, enabled=True, bot="example") -> Sett
 
 class NoticeTests(unittest.TestCase):
     def test_all_marker_boundaries_and_single_character_chunks(self):
-        content = "Hello, world." + MARKER + "Private report"
-        for boundary in range(len(content) + 1):
+        # Wire examples are deliberately independent of the splitter constant:
+        # the gateway heading changed without changing the demo's old tests.
+        for marker in (
+            "\n\n---\nPII protection notice — powered by neurwerk\n",
+            "\n\n---\nPII Engine Notice\n",
+        ):
+            content = "Hello, world." + marker + "Private report"
+            for boundary in range(len(content) + 1):
+                splitter = NoticeSplitter()
+                speech = splitter.feed(content[:boundary]) + splitter.feed(content[boundary:])
+                speech += splitter.finish()
+                self.assertEqual(speech, "Hello, world.")
+                self.assertEqual(splitter.notice, "Private report")
             splitter = NoticeSplitter()
-            speech = splitter.feed(content[:boundary]) + splitter.feed(content[boundary:])
-            speech += splitter.finish()
-            self.assertEqual(speech, "Hello, world.")
+            self.assertEqual("".join(splitter.feed(c) for c in content), "Hello, world.")
             self.assertEqual(splitter.notice, "Private report")
+
+    def test_near_marker_is_normal_text_but_truncated_marker_is_not_speech(self):
+        text = "Hello.\n\n---\nAn ordinary heading."
         splitter = NoticeSplitter()
-        self.assertEqual("".join(splitter.feed(c) for c in content), "Hello, world.")
-        self.assertEqual(splitter.notice, "Private report")
+        self.assertEqual("".join(splitter.feed(c) for c in text) + splitter.finish(), text)
+        splitter = NoticeSplitter()
+        self.assertEqual(splitter.feed("Hello.\n\n---\nPII protection notice — powered"), "Hello.")
+        self.assertEqual(splitter.finish(), "")
 
     def test_inline_controls_split_at_every_boundary(self):
         for tag in ("think", "analysis", "reasoning", "tool_call", "function_call"):
@@ -620,7 +634,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             key.write_text("must-not-be-used")
             config = settings(key)
             captured = []
-            body = "Hello.<think>internal</think> Again." + MARKER + "Report"
+            body = (
+                "Hello.<think>internal</think> Again."
+                "\n\n---\nPII protection notice — powered by neurwerk\nReport"
+            )
             deltas = [{"choices": [{"index": 0, "delta": {"reasoning_content": "private"}}]}]
             deltas += [{"choices": [{"index": 0, "delta": {"content": char}}]} for char in body]
             deltas += [
