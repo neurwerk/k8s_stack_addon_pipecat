@@ -9,6 +9,56 @@ import {
 } from "@pipecat-ai/small-webrtc-transport";
 import { parseTiming, type TurnTiming } from "./timings";
 
+export interface ChatError {
+  text: string;
+  createdAt: string;
+}
+
+// The pinned WebSocket transport sends audio without a track ID. Its player
+// permanently ignores a track once interrupted, and its retiring worklet can
+// discard audio sent before it stops. Give each playback a new ID and hold
+// incoming chunks until the old worklet has been detached.
+function websocketAudioManager() {
+  const manager = new WavMediaManager(512, 16000);
+  const buffer = manager.bufferBotAudio.bind(manager);
+  const interrupt = manager.interruptBotAudio.bind(manager);
+  let playback = 0;
+  let interrupting: Promise<void> | undefined;
+  let pending: Int16Array[] = [];
+
+  manager.bufferBotAudio = (data: Int16Array, id?: string) => {
+    if (interrupting) {
+      if (pending.length >= 128) throw new Error("Bot audio queue full");
+      pending.push(data);
+      return;
+    }
+    return buffer(data, id ?? `reply-${playback}`);
+  };
+  manager.interruptBotAudio = () => {
+    if (interrupting) return interrupting;
+    playback++;
+    interrupting = (async () => {
+      try {
+        await interrupt();
+      } finally {
+        // The pinned player does not expose a reset method. Its worklet sends
+        // "stop" asynchronously; detach it before feeding the next reply.
+        const player = Reflect.get(manager, "_wavStreamPlayer") as {
+          stream: AudioWorkletNode | null;
+        };
+        player.stream?.disconnect();
+        player.stream = null;
+        const queued = pending;
+        pending = [];
+        interrupting = undefined;
+        for (const chunk of queued) manager.bufferBotAudio(chunk);
+      }
+    })();
+    return interrupting;
+  };
+  return manager;
+}
+
 function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
   const node = document.getElementById(id);
   if (!(node instanceof type)) throw new Error(`Missing element: ${id}`);
@@ -48,6 +98,7 @@ export function initializeSession(
   onTimings: (timings: TurnTiming[]) => void,
   onSpeaking: (speaking: boolean) => void,
   onNotices: (notices: string[]) => void,
+  onErrors: (errors: ChatError[]) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -58,6 +109,7 @@ export function initializeSession(
   const audio = element("audio", HTMLAudioElement);
   const enableAudio = element("enable-audio", HTMLButtonElement);
   const reasoning = element("reasoning", HTMLSelectElement);
+  const transportChoice = element("transport", HTMLSelectElement);
   const base = location.pathname.replace(/\/$/, "");
   let csrf = "";
   let active: Attempt | undefined;
@@ -78,6 +130,7 @@ export function initializeSession(
     stopped?: Promise<void>;
     timings: TurnTiming[];
     notices: string[];
+    errors: ChatError[];
     pollingNotices?: boolean;
   }
   class Cancelled extends Error {}
@@ -154,6 +207,7 @@ export function initializeSession(
       if (!active) {
         start.disabled = !sessionsEnabled;
         reasoning.disabled = !sessionsEnabled;
+        transportChoice.disabled = !sessionsEnabled;
         mute.textContent = "Mute microphone";
         status.textContent = "Conversation ended.";
       }
@@ -256,6 +310,13 @@ export function initializeSession(
         if (current()) {
           const data =
             object(message) && object(message.data) ? message.data : undefined;
+          const error = typeof data?.error === "string" ? data.error : "";
+          if (/^Model (response was invalid or incomplete\. Please retry\.|connection failed or timed out\. Please retry\.|request rejected \(HTTP \d{3}\)\.)$/.test(error)) {
+            attempt.errors = [...attempt.errors, { text: error, createdAt: new Date().toISOString() }].slice(-8);
+            onErrors(attempt.errors);
+          }
+          if (attempt.connecting && !attempt.mediaConnected && error.startsWith("websocket "))
+            return;
           if (data?.fatal === false && !attempt.serviceError) {
             attempt.recoverableError = true;
             callError.textContent = typeof data.error === "string"
@@ -304,10 +365,70 @@ export function initializeSession(
       attempt.pollingNotices = false;
     }
   }
+  async function connectWebRTC(
+    attempt: Attempt,
+    servers: RTCIceServer[],
+    options: object,
+  ): Promise<void> {
+    const webrtc = new SmallWebRTCTransport({
+      iceServers: servers,
+      mediaManager: new WavMediaManager(),
+    });
+    attempt.client = new PipecatClient({
+      transport: webrtc,
+      enableMic: true,
+      enableCam: false,
+      callbacks: callbacks(attempt, webrtc),
+    });
+    onClient(attempt.client);
+    await deadline(
+      attempt,
+      attempt.client.connect({
+        webrtcRequestParams: {
+          endpoint: `${base}/api/offer`,
+          headers: { "X-CSRF-Token": csrf },
+          requestData: options,
+        },
+      }),
+    );
+  }
+  async function connectWebSocket(attempt: Attempt, options: object): Promise<void> {
+    const ticketResponse = await mutation("/api/websocket-ticket", options);
+    check(attempt);
+    if (!ticketResponse.ok) throw new Error("WebSocket admission denied");
+    const ticket: unknown = await ticketResponse.json();
+    check(attempt);
+    if (!object(ticket) || typeof ticket.ticket !== "string")
+      throw new Error("Invalid ticket");
+    const { WebSocketTransport, ProtobufFrameSerializer } = await import(
+      "@pipecat-ai/websocket-transport"
+    );
+    check(attempt);
+    attempt.client = new PipecatClient({
+      transport: new WebSocketTransport({
+        // Match the server's 16 kHz input and the WAV player's 24 kHz output.
+        mediaManager: websocketAudioManager(),
+        serializer: new ProtobufFrameSerializer(),
+        recorderSampleRate: 16000,
+        playerSampleRate: 24000,
+      }),
+      enableMic: true,
+      enableCam: false,
+      callbacks: callbacks(attempt),
+    });
+    onClient(attempt.client);
+    const url = new URL(`${base}/api/websocket`, location.origin);
+    url.protocol = "wss:";
+    url.searchParams.set("ticket", ticket.ticket);
+    await deadline(attempt, attempt.client.connect({ wsUrl: url.toString() }));
+  }
   async function connect(servers: RTCIceServer[]): Promise<void> {
     if (active || !sessionsEnabled) return;
     const options = reasoning.value ? { reasoning_effort: reasoning.value } : {};
+    const preferred = transportChoice.value === "websocket" ? "websocket" : "webrtc";
+    let selected = preferred;
     reasoning.disabled = true;
+    transportChoice.disabled = true;
     const attempt: Attempt = {
       cancelled: false,
       connecting: true,
@@ -316,11 +437,13 @@ export function initializeSession(
       transport: 0,
       timings: [],
       notices: [],
+      errors: [],
     };
     active = attempt;
     enableAudio.hidden = true;
     onTimings([]);
     onNotices([]);
+    onErrors([]);
     onSpeaking(false);
     callError.textContent = "";
     callError.hidden = true;
@@ -337,28 +460,9 @@ export function initializeSession(
       });
       permission.getTracks().forEach((track) => track.stop());
       check(attempt);
-      const webrtc = new SmallWebRTCTransport({
-        iceServers: servers,
-        mediaManager: new WavMediaManager(),
-      });
-      attempt.client = new PipecatClient({
-        transport: webrtc,
-        enableMic: true,
-        enableCam: false,
-        callbacks: callbacks(attempt, webrtc),
-      });
-      onClient(attempt.client);
       try {
-        await deadline(
-          attempt,
-          attempt.client.connect({
-            webrtcRequestParams: {
-              endpoint: `${base}/api/offer`,
-              headers: { "X-CSRF-Token": csrf },
-              requestData: options,
-            },
-          }),
-        );
+        if (selected === "webrtc") await connectWebRTC(attempt, servers, options);
+        else await connectWebSocket(attempt, options);
       } catch (error: unknown) {
         check(attempt);
         const refused = object(error) && typeof error.status === "number";
@@ -374,46 +478,20 @@ export function initializeSession(
         const cancelled = await attempt.serverCancel;
         check(attempt);
         if (!cancelled.ok) throw new Error("Cleanup denied");
-        const ticketResponse = await mutation("/api/websocket-ticket", options);
+        selected = preferred === "webrtc" ? "websocket" : "webrtc";
+        transportChoice.value = selected;
+        status.textContent = selected === "webrtc"
+          ? "HTTPS WebSocket unavailable. Trying WebRTC…"
+          : "WebRTC unavailable. Trying HTTPS WebSocket…";
         check(attempt);
-        if (!ticketResponse.ok) throw new Error("Fallback admission denied");
-        const ticket: unknown = await ticketResponse.json();
-        check(attempt);
-        if (!object(ticket) || typeof ticket.ticket !== "string")
-          throw new Error("Invalid ticket");
-        const { WebSocketTransport, ProtobufFrameSerializer } = await import(
-          "@pipecat-ai/websocket-transport"
-        );
-        check(attempt);
-        status.textContent =
-          "WebRTC unavailable. Connecting using HTTPS WebSocket audio…";
-        attempt.client = new PipecatClient({
-          transport: new WebSocketTransport({
-            // Match the server's 16 kHz input and the WAV player's 24 kHz output.
-            mediaManager: new WavMediaManager(512, 16000),
-            serializer: new ProtobufFrameSerializer(),
-            recorderSampleRate: 16000,
-            playerSampleRate: 24000,
-          }),
-          enableMic: true,
-          enableCam: false,
-          callbacks: callbacks(attempt),
-        });
-        onClient(attempt.client);
-        const url = new URL(`${base}/api/websocket`, location.origin);
-        url.protocol = "wss:";
-        url.searchParams.set("ticket", ticket.ticket);
-        check(attempt);
-        await deadline(
-          attempt,
-          attempt.client.connect({ wsUrl: url.toString() }),
-        );
+        if (selected === "webrtc") await connectWebRTC(attempt, servers, options);
+        else await connectWebSocket(attempt, options);
       }
       check(attempt);
       if (attempt.serviceError) throw new Error("Call failed during connection");
       attempt.connecting = false;
       mute.disabled = false;
-      status.textContent = "Connected. You can speak now.";
+      status.textContent = `Connected using ${selected === "webrtc" ? "WebRTC" : "HTTPS WebSocket"}. You can speak now.`;
       attempt.polling = setInterval(() => {
         void pollNotices(attempt);
       }, 1500);
@@ -478,6 +556,7 @@ export function initializeSession(
     const servers = iceList(data.iceServers);
     start.disabled = false;
     reasoning.disabled = false;
+    transportChoice.disabled = false;
     status.textContent = data.anonymous
       ? "Public bot using its scoped bot credential. Start when ready."
       : "Signed in. Start when ready.";

@@ -78,7 +78,7 @@ def create_app(settings: Settings) -> FastAPI:
             with contextlib.suppress(asyncio.CancelledError, TimeoutError):
                 await asyncio.wait_for(peer.task, timeout=10)
         if isinstance(peer.connection, WebSocket):
-            with contextlib.suppress(RuntimeError):
+            with contextlib.suppress(RuntimeError, WebSocketDisconnect):
                 await peer.connection.close(code=1000)
         else:
             await peer.connection.disconnect()

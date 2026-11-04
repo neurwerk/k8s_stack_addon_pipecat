@@ -756,8 +756,103 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 self.assertEqual([error.error for error in errors], [expected])
                 self.assertNotIn(sensitive, str(errors))
-                self.assertFalse(llm.is_usable)
-                self.assertEqual(len(calls), 1)
+                self.assertEqual(llm.is_usable, outcome not in (403, 429))
+                self.assertEqual(len(calls), 1 if outcome in (403, 429) else 2)
+
+    async def test_invalid_or_disconnected_model_stream_recovers_before_text(self):
+        success = (
+            b'data: {"choices":[{"index":0,"delta":{"content":"Hello."},'
+            b'"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+        )
+        for first in (b'data: {"choices":null}\n\n', httpx.ReadError):
+            with self.subTest(first=first):
+                calls = []
+
+                def respond(request, calls=calls, first=first):
+                    calls.append(request)
+                    if len(calls) == 1:
+                        if first is httpx.ReadError:
+                            raise httpx.ReadError("private network detail", request=request)
+                        return httpx.Response(
+                            200, content=first, headers={"content-type": "text/event-stream"}
+                        )
+                    return httpx.Response(
+                        200, content=success, headers={"content-type": "text/event-stream"}
+                    )
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+                    llm = GatewayLLM(settings(Path("unused")), http, "synthetic", lambda _: None)
+                    llm.push_frame = AsyncMock()
+                    await llm.process_frame(
+                        LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM
+                    )
+                self.assertEqual(len(calls), 2)
+                self.assertTrue(llm.is_usable)
+                self.assertEqual(
+                    [
+                        call.args[0].text
+                        for call in llm.push_frame.await_args_list
+                        if isinstance(call.args[0], LLMTextFrame)
+                    ],
+                    ["Hello."],
+                )
+
+    async def test_twice_invalid_model_response_keeps_next_turn_available(self):
+        calls = []
+
+        def respond(request):
+            calls.append(request)
+            payload = (
+                b'data: {"choices":null}\n\n'
+                if len(calls) < 3
+                else b'data: {"choices":[{"index":0,"delta":{"content":"Next."},'
+                b'"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+            )
+            return httpx.Response(
+                200, content=payload, headers={"content-type": "text/event-stream"}
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            llm = GatewayLLM(settings(Path("unused")), http, "synthetic", lambda _: None)
+            llm.push_frame = AsyncMock()
+            for _ in range(2):
+                await llm.process_frame(LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(llm.is_usable)
+        self.assertEqual(
+            [
+                call.args[0].error
+                for call in llm.push_frame.await_args_list
+                if isinstance(call.args[0], ErrorFrame)
+            ],
+            ["Model response was invalid or incomplete. Please retry."],
+        )
+
+    async def test_partial_model_output_is_not_replayed_on_failure(self):
+        calls = []
+
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(
+                200,
+                content=b'data: {"choices":[{"index":0,"delta":{"content":"Partial."}}]}\n\n',
+                headers={"content-type": "text/event-stream"},
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            llm = GatewayLLM(settings(Path("unused")), http, "synthetic", lambda _: None)
+            llm.push_frame = AsyncMock()
+            await llm.process_frame(LLMContextFrame(LLMContext([])), FrameDirection.DOWNSTREAM)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(llm.is_usable)
+        self.assertEqual(
+            [
+                call.args[0].text
+                for call in llm.push_frame.await_args_list
+                if isinstance(call.args[0], LLMTextFrame)
+            ],
+            ["Partial."],
+        )
 
     async def test_cancellation_closes_gateway_stream(self):
         started, closed = asyncio.Event(), asyncio.Event()
