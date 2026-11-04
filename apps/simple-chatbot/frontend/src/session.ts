@@ -9,6 +9,51 @@ import {
 } from "@pipecat-ai/small-webrtc-transport";
 import { parseTiming, type TurnTiming } from "./timings";
 
+// The pinned WebSocket transport sends audio without a track ID. Its player
+// permanently ignores a track once interrupted, and its retiring worklet can
+// discard audio sent before it stops. Give each playback a new ID and hold
+// incoming chunks until the old worklet has been detached.
+function websocketAudioManager() {
+  const manager = new WavMediaManager(512, 16000);
+  const buffer = manager.bufferBotAudio.bind(manager);
+  const interrupt = manager.interruptBotAudio.bind(manager);
+  let playback = 0;
+  let interrupting: Promise<void> | undefined;
+  let pending: Int16Array[] = [];
+
+  manager.bufferBotAudio = (data: Int16Array, id?: string) => {
+    if (interrupting) {
+      if (pending.length >= 128) throw new Error("Bot audio queue full");
+      pending.push(data);
+      return;
+    }
+    return buffer(data, id ?? `reply-${playback}`);
+  };
+  manager.interruptBotAudio = () => {
+    if (interrupting) return interrupting;
+    playback++;
+    interrupting = (async () => {
+      try {
+        await interrupt();
+      } finally {
+        // The pinned player does not expose a reset method. Its worklet sends
+        // "stop" asynchronously; detach it before feeding the next reply.
+        const player = Reflect.get(manager, "_wavStreamPlayer") as {
+          stream: AudioWorkletNode | null;
+        };
+        player.stream?.disconnect();
+        player.stream = null;
+        const queued = pending;
+        pending = [];
+        interrupting = undefined;
+        for (const chunk of queued) manager.bufferBotAudio(chunk);
+      }
+    })();
+    return interrupting;
+  };
+  return manager;
+}
+
 function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
   const node = document.getElementById(id);
   if (!(node instanceof type)) throw new Error(`Missing element: ${id}`);
@@ -390,7 +435,7 @@ export function initializeSession(
         attempt.client = new PipecatClient({
           transport: new WebSocketTransport({
             // Match the server's 16 kHz input and the WAV player's 24 kHz output.
-            mediaManager: new WavMediaManager(512, 16000),
+            mediaManager: websocketAudioManager(),
             serializer: new ProtobufFrameSerializer(),
             recorderSampleRate: 16000,
             playerSampleRate: 24000,
