@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import httpx
 from fastapi import WebSocket
+from loguru import logger
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
@@ -114,6 +115,15 @@ async def run_bot(
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
     greeted = False
+
+    @worker.event_handler("on_pipeline_error")
+    async def on_pipeline_error(worker, frame):
+        logger.warning(
+            "Voice pipeline error processor={} category={} usable={}",
+            type(frame.processor).__name__,
+            frame.category.value if frame.category else "unknown",
+            frame.processor.is_usable if frame.processor else None,
+        )
 
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):

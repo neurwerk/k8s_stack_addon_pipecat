@@ -36,6 +36,7 @@ function App() {
   const [model, setModel] = useState("");
   const [timings, setTimings] = useState<TurnTiming[]>([]);
   const [speaking, setSpeaking] = useState(false);
+  const [notices, setNotices] = useState<string[]>([]);
   // No device initialization before an explicit Start click and admission check.
   const [client, setClient] = useState(
     () =>
@@ -47,7 +48,7 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking), []);
+  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices), []);
 
   return (
     <PipecatClientProvider client={client}>
@@ -142,16 +143,8 @@ function App() {
           </p>
           <audio id="audio" hidden />
         </section>
-        <ConversationPanel model={model} className="min-h-96 flex-1" />
+        <ConversationPanel model={model} notices={notices} className="min-h-96 flex-1" />
         <TimingPanel timings={timings} speaking={speaking} />
-        <div
-          id="notices"
-          role="log"
-          aria-label="Processing notices"
-          aria-live="polite"
-          hidden
-          className="space-y-3 whitespace-pre-wrap rounded-xl border bg-muted/40 p-5 text-sm"
-        />
         <footer className="text-center text-xs text-muted-foreground">
           Built with Pipecat and Pipecat UI
         </footer>

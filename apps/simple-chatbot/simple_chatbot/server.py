@@ -292,6 +292,7 @@ def create_app(settings: Settings) -> FastAPI:
                 if not answer:
                     raise ValueError("Missing answer")
                 peers[connection.pc_id] = peer
+                notices.pop(session.id, None)
 
                 def notice(text: str) -> None:
                     events = notices.setdefault(session.id, [])
@@ -400,6 +401,7 @@ def create_app(settings: Settings) -> FastAPI:
                 return
             await websocket.accept()
             peers[key] = Peer(session.id, websocket, session.expires, task=asyncio.current_task())
+            notices.pop(session.id, None)
 
         def notice(text: str) -> None:
             events = notices.setdefault(session.id, [])
@@ -449,7 +451,7 @@ def main() -> None:
     logger.remove()
     logger.add(
         sys.stderr,
-        level="ERROR",
+        level="INFO",
         format="{time} {level} {message}",
         filter=lambda record: record["name"].startswith("simple_chatbot"),
     )

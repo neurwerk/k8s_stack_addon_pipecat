@@ -9,7 +9,9 @@ import wave
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 
 import httpx
+from loguru import logger
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     Frame,
     InputAudioRawFrame,
     InterruptionFrame,
@@ -23,6 +25,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.text.transforms import strip_markdown
 from pipecat.utils.time import time_now_iso8601
 
@@ -395,11 +398,37 @@ class HTTPTTS(TTSService):
             sample_rate=24000,
             push_start_frame=True,
             push_stop_frames=True,
+            # HTTP reads time out after 45 seconds. Do not expire a context
+            # while a legitimate synthesis request is still waiting for audio.
+            stop_frame_timeout_s=50,
+            # HTTP failures are classified below; silence is not proof that
+            # every future request will fail.
+            max_consecutive_zero_audio_contexts=0,
             text_transforms=[("*", speech_text)],
         )
         self.speech = settings
         self.http = http
         self.timing: TurnTiming | None = None
+        self._synthesis_failed = False
+
+    async def tts_process_generator(self, context_id: str, generator):
+        try:
+            await super().tts_process_generator(context_id, generator)
+        finally:
+            # Unlike a WebSocket TTS, this HTTP generator is finished even if
+            # it emitted no audio. Close its context normally at turn end.
+            self._is_yielding_frames_synchronously = True
+
+    async def _push_spoken_text(
+        self, src_frame: AggregatedTextFrame, text: str, context_id: str, append_to_context: bool
+    ):
+        if self._synthesis_failed:
+            # A broken stream has no reliable word alignment. Do not record
+            # the entire sentence as spoken or replay audio already emitted.
+            for frame in self._aggregated_frame_sequencer.complete_spoken_slot():
+                await self.push_frame(frame)
+            return
+        await super()._push_spoken_text(src_frame, text, context_id, append_to_context)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, LLMFullResponseStartFrame):
@@ -416,6 +445,13 @@ class HTTPTTS(TTSService):
             )
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        self._synthesis_failed = False
+        started = time.monotonic()
+        first_audio_ms = None
+        audio_bytes = 0
+        status_code = None
+        no_speakable_text = False
+        outcome = "complete"
         timing = self.timing
         if timing:
             await timing.start_tts()
@@ -431,16 +467,64 @@ class HTTPTTS(TTSService):
                     "response_format": "pcm",
                 },
             ) as response:
+                status_code = response.status_code
+                if status_code == 422:
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > 4096:
+                            break
+                    if len(body) <= 4096:
+                        try:
+                            detail = json.loads(body).get("detail")
+                            no_speakable_text = (
+                                isinstance(detail, dict)
+                                and detail.get("code") == "no_speakable_text"
+                            )
+                        except (ValueError, AttributeError):
+                            pass
                 response.raise_for_status()
                 async for audio in bounded_pcm(response):
+                    if first_audio_ms is None:
+                        first_audio_ms = round((time.monotonic() - started) * 1000)
+                    audio_bytes += len(audio)
                     if timing:
                         await timing.first_audio()
                     yield TTSAudioRawFrame(audio, 24000, 1, context_id=context_id)
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as error:
+            self._synthesis_failed = True
+            outcome = "failed"
             if timing:
                 await timing.finish("failed")
-            await self.push_error("Speech synthesis failed", force_treat_as_permanent=True)
+            # Request-local content rejection must not disable future speech.
+            # Credentials, endpoint and model configuration still require a fix.
+            category = (
+                ErrorCategory.APPLICATION
+                if no_speakable_text
+                else classify_http_status_code(status_code)
+                if status_code is not None and status_code >= 400
+                else ErrorCategory.CONNECTIVITY
+                if isinstance(error, httpx.HTTPError)
+                else ErrorCategory.SERVER
+            )
+            await self.push_error(
+                "Speech synthesis failed",
+                category=category,
+            )
         except asyncio.CancelledError:
+            outcome = "interrupted"
             if timing:
                 await timing.finish("interrupted")
             raise
+        finally:
+            # No input text, response bodies, URLs, credentials or exceptions.
+            logger.info(
+                "TTS request context={} outcome={} status={} first_audio_ms={} "
+                "elapsed_ms={} audio_bytes={}",
+                context_id,
+                outcome,
+                status_code,
+                first_audio_ms,
+                round((time.monotonic() - started) * 1000),
+                audio_bytes,
+            )
