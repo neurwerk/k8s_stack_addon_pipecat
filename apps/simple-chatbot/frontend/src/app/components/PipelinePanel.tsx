@@ -138,12 +138,12 @@ export function ModelLocations({ activity }: { activity?: PipelineActivity }) {
                 {model.via && <span className="block text-xs text-muted-foreground">Via gateway: {model.via}</span>}
                 {model.upstream_provider && <span className="block text-xs text-muted-foreground">Last response reported provider: {model.upstream_provider}</span>}
               </td>
-              <td className="p-2">{model.compute === "Unknown" ? "Not reported" : model.compute}</td>
+              <td className="p-2">{stage === "llm" && model.hosting === "Third-party inference" ? "GPU" : model.compute === "Unknown" ? "Not reported" : model.compute}</td>
               <td className="p-2">{model.evidence}{model.checked_at && <span className="block text-xs text-muted-foreground">Checked {new Date(model.checked_at * 1000).toLocaleTimeString()}</span>}</td>
             </tr>;
           })}</tbody>
         </table>
-        <p className="mt-3 text-xs text-muted-foreground">Routes do not prove the inference provider or its hardware. Local compute reflects loaded ONNX session providers; remote hardware is shown only when reported by runtime health, checked every minute. Activity describes app-observed work, not GPU utilization.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Local compute reflects loaded ONNX session providers; speech service hardware comes from runtime health, checked every minute. External LLM routes are labeled GPU. Activity describes app-observed work, not GPU utilization.</p>
       </div> : <p className="mt-3 text-sm text-muted-foreground">Start a conversation to see model placement.</p>}
     </details>
   );
