@@ -339,6 +339,45 @@ class PageAdmissionTests(unittest.TestCase):
 
 
 class SessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shutdown_disconnect_failure_closes_shared_http_client(self):
+        config = settings(Path("unused"), protected=True)
+        shared = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
+        self.addAsyncCleanup(shared.aclose)
+        with patch("simple_chatbot.server.httpx.AsyncClient", return_value=shared):
+            app = create_app(config)
+        started = asyncio.Event()
+        failure = RuntimeError("synthetic disconnect failure")
+
+        async def bot(*args):
+            started.set()
+            await asyncio.Event().wait()
+
+        with (
+            patch("simple_chatbot.server.Auth.initialize", new=AsyncMock()),
+            patch("simple_chatbot.server.SmallWebRTCConnection", FakeConnection),
+            patch.object(FakeConnection, "disconnect", new=AsyncMock(side_effect=failure)),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                async with app.router.lifespan_context(app):
+                    app.state.run_bot = bot
+                    session = app.state.auth.create(
+                        "synthetic-token", "user", time.time() + 300, signed_in=True
+                    )
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app), base_url=config.public_origin
+                    ) as client:
+                        client.cookies.set(app.state.auth.cookie, session.id)
+                        client.headers.update(
+                            {"x-csrf-token": session.csrf, "origin": config.public_origin}
+                        )
+                        response = await client.post(
+                            "/example/api/offer", json={"sdp": "synthetic", "type": "offer"}
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        await asyncio.wait_for(started.wait(), 1)
+            self.assertIs(raised.exception, failure)
+            self.assertTrue(shared.is_closed)
+
     async def test_reasoning_admission_validation_and_call_isolation(self):
         config = settings(Path("unused"), protected=True)
         app = create_app(config)

@@ -92,7 +92,7 @@ class TurnTiming:
 
 
 class TurnTimings:
-    def __init__(self, send: TimingSink, activity: Activity | None = None):
+    def __init__(self, send: TimingSink, activity: Activity | None = None) -> None:
         self.send = send
         self.activity = activity
         self.sequence = 0

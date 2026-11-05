@@ -34,7 +34,7 @@ class Login:
 
 
 class Auth:
-    def __init__(self, settings: Settings, http: httpx.AsyncClient):
+    def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
         self.settings = settings
         self.http = http
         self.sessions: dict[str, WebSession] = {}

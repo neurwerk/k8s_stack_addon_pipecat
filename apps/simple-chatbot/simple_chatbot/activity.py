@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.frames.frames import (
@@ -37,7 +37,7 @@ RESPONSE_STAGES = ("llm", "tool", "buffer", "tts", "output")
 
 
 class Activity:
-    def __init__(self):
+    def __init__(self) -> None:
         self.started = time.monotonic()
         self.sequence = 0
         self.states: dict[str, dict] = {}
@@ -93,7 +93,7 @@ class Activity:
             self.set(stage, status, label)
 
     @contextlib.contextmanager
-    def work(self, stage: str, label: str):
+    def work(self, stage: str, label: str) -> Iterator[int]:
         token = self.begin(stage, label)
         try:
             yield token
@@ -204,11 +204,11 @@ class Activity:
 
 
 class ActivityObserver(BaseObserver):
-    def __init__(self, activity: Activity):
+    def __init__(self, activity: Activity) -> None:
         super().__init__(observe_every_push=False)
         self.activity = activity
 
-    async def on_push_frame(self, data: FramePushed):
+    async def on_push_frame(self, data: FramePushed) -> None:
         a, frame = self.activity, data.frame
         if a.paused or a.closed:
             return
@@ -247,7 +247,7 @@ class ActivityObserver(BaseObserver):
 
 
 class ObservedSmartTurn(LocalSmartTurnAnalyzerV3):
-    def __init__(self, activity: Activity):
+    def __init__(self, activity: Activity) -> None:
         super().__init__()
         self.activity = activity
 

@@ -85,7 +85,7 @@ class DiarizationSession:
     Pipecat audio path; the queue is bounded by both count and PCM bytes.
     """
 
-    def __init__(self, settings: Diarization):
+    def __init__(self, settings: Diarization) -> None:
         self.settings = settings
         self.profiles = SpeakerProfiles(ttl=settings.profile_ttl_seconds)
         self.session_id: str | None = None

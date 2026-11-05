@@ -140,19 +140,18 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             await auth.initialize()
             from simple_chatbot.bot import run_bot
-        except BaseException:
-            await http.aclose()
-            raise
-        app.state.run_bot = run_bot
-        reaper = asyncio.create_task(reap())
-        try:
-            yield
+
+            app.state.run_bot = run_bot
+            reaper = asyncio.create_task(reap())
+            try:
+                yield
+            finally:
+                reaper.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await reaper
+                await asyncio.gather(*(close_peer(key) for key in list(peers)))
+                await asyncio.gather(*(forget_owner(owner) for owner in list(speaker_sessions)))
         finally:
-            reaper.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await reaper
-            await asyncio.gather(*(close_peer(key) for key in list(peers)))
-            await asyncio.gather(*(forget_owner(owner) for owner in list(speaker_sessions)))
             await http.aclose()
 
     http = httpx.AsyncClient(

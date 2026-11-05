@@ -15,6 +15,7 @@ addon-check:
 	$(TOOLING) addon-check "$(CURDIR)" --base "$(BASE)"
 
 lint:
+	uv lock --check
 	uv run --frozen ruff check src tests apps/simple-chatbot
 	uv run --frozen ruff format --check src tests apps/simple-chatbot
 	@for chart in $(CHARTS); do helm lint --strict "$$chart"; helm lint --strict "$$chart" --namespace pipecat -f validation/values.yaml; done

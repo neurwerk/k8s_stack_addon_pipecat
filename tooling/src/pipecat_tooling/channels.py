@@ -11,6 +11,7 @@ import tarfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from typing import TypedDict, cast
 
 import boto3
 from botocore.config import Config
@@ -28,6 +29,18 @@ from pipecat_tooling.apps import (
 MAX_POINTER = 8192
 SHA = re.compile(r"[a-f0-9]{64}")
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[a-z0-9.+-]*)")
+
+
+class ChannelRecord(TypedDict):
+    version: int
+    app: str
+    channel: str
+    revision: str
+    previous: str | None
+    publishedAt: str
+    key: str
+    sha256: str
+    runtimeVersion: str
 
 
 def s3_client(endpoint: str, **credentials):
@@ -62,7 +75,7 @@ def read_object(client, bucket: str, key: str, limit: int) -> tuple[bytes, str]:
         response["Body"].close()
 
 
-def decode_pointer(data: bytes, app: str, channel: str) -> dict:
+def decode_pointer(data: bytes, app: str, channel: str) -> ChannelRecord:
     try:
         value = json.loads(data)
         if (
@@ -102,12 +115,14 @@ def decode_pointer(data: bytes, app: str, channel: str) -> dict:
         ):
             raise ValueError
         datetime.fromisoformat(value["publishedAt"])
-        return value
+        return cast(ChannelRecord, value)
     except (ValueError, TypeError, KeyError, RecursionError):
         raise AppError("Invalid release channel record") from None
 
 
-def read_pointer(client, bucket: str, app: str, channel: str) -> tuple[dict | None, str | None]:
+def read_pointer(
+    client, bucket: str, app: str, channel: str
+) -> tuple[ChannelRecord | None, str | None]:
     try:
         data, etag = read_object(client, bucket, channel_key(app, channel), MAX_POINTER)
     except ClientError as error:
@@ -193,11 +208,13 @@ def verify_bundle(client, bucket: str, app: str, digest: str, runtime: str) -> s
     return key
 
 
-def promote(client, bucket: str, app: str, channel: str, digest: str, runtime: str) -> dict:
+def promote(
+    client, bucket: str, app: str, channel: str, digest: str, runtime: str
+) -> ChannelRecord:
     # Capture the predecessor before verification; a concurrent publisher must not be overwritten.
     previous, etag = read_pointer(client, bucket, app, channel)
     key = verify_bundle(client, bucket, app, digest, runtime)
-    record = dict(
+    record: ChannelRecord = dict(
         version=1,
         app=app,
         channel=channel,

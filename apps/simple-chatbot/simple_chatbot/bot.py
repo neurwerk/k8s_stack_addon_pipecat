@@ -15,6 +15,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import (
+    Frame,
     InputAudioRawFrame,
     LLMContextFrame,
     LLMRunFrame,
@@ -124,7 +125,7 @@ async def run_bot(
         paused = False
         llm_boundary = False
 
-        async def process_frame(self, frame, direction: FrameDirection):
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)
             input_frames = (
                 InputAudioRawFrame,
