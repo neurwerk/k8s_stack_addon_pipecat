@@ -27,10 +27,13 @@ pipecat:
         secretName: app-bundle-reader
       bindingId: voice
       modelId: example-model
-      stt: {baseUrl: https://speech.example.com/v1, model: whisper-1}
-      tts: {baseUrl: https://speech.example.com/v1, model: tts-1, voice: alloy}
+      stt: {baseUrl: https://speech.example.com/v1, model: whisper-1, modelName: example/transcription, modelRevision: reviewed-example, compute: GPU}
+      tts: {baseUrl: https://speech.example.com/v1, model: tts-1, voice: alloy, modelName: example/synthesis, modelRevision: reviewed-example, compute: GPU}
       diarization:
         url: wss://speech.example.com/v1/diarization/stream
+        modelName: example/diarization
+        modelRevision: reviewed-example
+        compute: GPU
         secretRef: {name: pipecat-bot-example, key: diarizationApiKey}
     - id: public-example
       script:
