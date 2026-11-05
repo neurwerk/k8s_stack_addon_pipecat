@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,7 @@ from unittest.mock import patch
 import yaml
 
 from neurwerk_pipecat import __version__
-from neurwerk_pipecat.bundle import extract
+from neurwerk_pipecat.bundle import bundle_reference, extract
 
 
 class BundleTests(unittest.TestCase):
@@ -79,6 +80,14 @@ class BundleTests(unittest.TestCase):
             path = self.archive(root, self.files())
             extract(path, root / "accepted", hashlib.sha256(path.read_bytes()).hexdigest())
             self.assertTrue((root / "accepted/main.py").is_file())
+            with self.assertRaisesRegex(ValueError, "identity"):
+                extract(
+                    path,
+                    root / "wrong-app",
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                    expected_app="another-app",
+                )
+            self.assertFalse((root / "wrong-app").exists())
             for changes in (
                 {"runtimeVersion": "unsupported"},
                 {"runtimeVersion": "0.1.0"},
@@ -90,6 +99,50 @@ class BundleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     extract(path, root / "rejected", hashlib.sha256(path.read_bytes()).hexdigest())
                 self.assertFalse((root / "rejected").exists())
+
+    def test_channel_reference_binds_policy_and_preserves_bootstrap(self):
+        digest = "a" * 64
+        release = {
+            "app": "assistant",
+            "endpoint": "https://s3.example.com",
+            "bucket": "apps",
+            "channel": "dev",
+            "runtimeVersion": __version__,
+            "sha256": digest,
+            "key": f"pipecat/assistant/{digest}.tar.gz",
+        }
+        env = {
+            "S3_KEY": "bootstrap",
+            "BUNDLE_SHA256": "b" * 64,
+            "BUNDLE_APP_ID": "assistant",
+            "BUNDLE_CHANNEL": "dev",
+            "BUNDLE_RUNTIME_VERSION": __version__,
+        }
+        with patch.dict(os.environ, env, clear=True):
+
+            def resolve():
+                return bundle_reference(release["endpoint"], release["bucket"])
+
+            bootstrap = (env["S3_KEY"], env["BUNDLE_SHA256"])
+            self.assertEqual(resolve(), bootstrap)
+            os.environ["BUNDLE_CHANNEL_RELEASE"] = json.dumps(release)
+            self.assertEqual(resolve(), (release["key"], digest))
+            for field in ("app", "endpoint", "bucket", "channel", "runtimeVersion"):
+                with self.subTest(field=field):
+                    os.environ["BUNDLE_CHANNEL_RELEASE"] = json.dumps({**release, field: "old"})
+                    self.assertEqual(resolve(), bootstrap)
+            for invalid in (
+                "[",
+                "[]",
+                "x" * 8193,
+                json.dumps({**release, "key": f"pipecat/other/{digest}.tar.gz"}),
+                json.dumps({**release, "sha256": "invalid"}),
+            ):
+                os.environ["BUNDLE_CHANNEL_RELEASE"] = invalid
+                with self.assertRaises(ValueError):
+                    resolve()
+            del os.environ["BUNDLE_CHANNEL"]
+            self.assertEqual(resolve(), bootstrap)
 
     def test_hash_checked_before_parsing_and_unsafe_members_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

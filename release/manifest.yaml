@@ -3,9 +3,9 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.2.3
-  # Runtime 0.2.1 and tooling 0.2.3 publication and anonymous linux/amd64 pulls verified.
-  status: ready
+  version: 0.2.4
+  # Channel release awaits runtime 0.2.2/tooling 0.2.4 publication and verified pins.
+  status: staged
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
@@ -72,6 +72,7 @@ spec:
       image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
   consumers:
     - {artifact: tooling, kind: Command, argv: [pipecat-validate, /work/addon]}
+    - {artifact: tooling, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: channel-controller, optional: true}
     - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: bot, optional: true}
     - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: load-script, location: initContainers, optional: true}
     - {artifact: runtime, package: secret-sync, kind: HelmRelease, namespace: pipecat, name: pipecat-shared, container: configure, location: initContainers, optional: true}

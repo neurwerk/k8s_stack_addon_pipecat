@@ -17,7 +17,7 @@ _SLUG = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
 _PROVIDER_GRANT = re.compile(r"provider:[a-z0-9][a-z0-9-]{0,47}:global-use")
 _BRIDGE = "auth-keycloak-api-key-bridge"
-_RESERVED_IDS = {"turn", "product-values"}
+_RESERVED_IDS = {"turn", "product-values", "channel-controller", "channel-config"}
 
 
 class SelectionError(ValueError):

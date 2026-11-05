@@ -17,6 +17,14 @@ pipecat:
   # script.accessKeyKey/secretKeyKey default to AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
   # For Rook's reader Secret use AccessKey/SecretKey directly; no credential copy.
   bots: []
+  channels:
+    image: ""
+    intervalSeconds: 30
+    resources:
+      requests: {cpu: 25m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 384Mi}
+    apiServerCIDR: ""
+    apiServerPort: 6443
   turn:
     enabled: false
     hostname: ""
