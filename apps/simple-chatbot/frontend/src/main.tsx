@@ -40,8 +40,8 @@ function MicrophoneControl({ paused }: { paused: boolean }) {
 
 function App() {
   const [model, setModel] = useState("");
+  const [initialPrompt, setInitialPrompt] = useState("");
   const [timings, setTimings] = useState<TurnTiming[]>([]);
-  const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
   const [errors, setErrors] = useState<ChatError[]>([]);
@@ -58,7 +58,7 @@ function App() {
       }),
   );
   useEffect(
-    () => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors, setPaused, setActivity),
+    () => initializeSession(setClient, setModel, setTimings, setNotices, setErrors, setPaused, setActivity, setInitialPrompt),
     [],
   );
 
@@ -166,9 +166,15 @@ function App() {
           </div>
           <audio id="audio" hidden />
         </section>
+        <details className="rounded-xl border bg-card px-5 py-3">
+          <summary className="cursor-pointer text-sm font-medium">Initial prompt</summary>
+          <p className="mt-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+            {initialPrompt || "Initial prompt unavailable."}
+          </p>
+        </details>
         <ConversationPanel model={model} notices={notices} errors={errors} className="min-h-96 flex-1" />
         <LivePipeline activity={activity} paused={paused} />
-        <TimingPanel timings={timings} speaking={speaking} />
+        <TimingPanel timings={timings} />
         <ActivityTimeline activity={activity} />
         <ModelLocations activity={activity} />
         <footer className="text-center text-xs text-muted-foreground">

@@ -36,6 +36,8 @@ class Speech(BaseModel):
     voice: str = "alloy"
     language: str = "en"
     compute: Literal["CPU", "GPU"] | None = None
+    model_name: str = Field(default="", max_length=200)
+    model_revision: str = Field(default="", max_length=200)
 
 
 class OIDC(BaseModel):
@@ -51,6 +53,9 @@ class Diarization(BaseModel):
     model_config = ConfigDict(extra="forbid")
     url: str
     key: SecretRef
+    model_name: str = Field(default="", max_length=200)
+    model_revision: str = Field(default="", max_length=200)
+    compute: Literal["CPU", "GPU"] | None = None
     profile_ttl_seconds: int = Field(default=86400, ge=60, le=86400)
     timeout_seconds: float = Field(default=15, ge=1, le=60)
 

@@ -3,7 +3,7 @@ export type Stage = (typeof stages)[number];
 export const statuses = ["active", "waiting", "complete", "interrupted", "failed", "off"] as const;
 export type Status = (typeof statuses)[number];
 export interface ActivityEvent { stage: Stage; status: Status; label: string; at_ms: number; seq: number }
-export interface ModelInfo { model: string; hosting: string; host: string; compute: string; evidence: string; via?: string; upstream_provider?: string; checked_at?: number }
+export interface ModelInfo { model: string; hosting: string; host: string; compute: string; evidence: string; revision?: string; via?: string; upstream_provider?: string; checked_at?: number }
 export interface PipelineActivity {
   at_ms: number;
   seq: number;
@@ -51,7 +51,7 @@ export function parseActivity(value: unknown): PipelineActivity | undefined {
     if (m === undefined) continue;
     if (!object(m) || !text(m.model) || !text(m.hosting) || !text(m.host) || !text(m.compute) || !text(m.evidence)) return;
     const info: ModelInfo = { model: m.model, hosting: m.hosting, host: m.host, compute: m.compute, evidence: m.evidence };
-    for (const optional of ["via", "upstream_provider"] as const) {
+    for (const optional of ["revision", "via", "upstream_provider"] as const) {
       if (m[optional] !== undefined) {
         if (!text(m[optional])) return;
         info[optional] = m[optional];

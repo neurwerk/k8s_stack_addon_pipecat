@@ -43,6 +43,7 @@ from pipecat.workers.runner import WorkerRunner
 from simple_chatbot.activity import Activity, ActivityObserver, ObservedSmartTurn
 from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.diarization import DiarizationSession
+from simple_chatbot.prompts import initial_prompt
 from simple_chatbot.runtime_info import configured_models, onnx_session_metadata, refresh_models
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
 from simple_chatbot.timings import TurnTimings
@@ -87,21 +88,7 @@ async def run_bot(
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "You are Chatbot, a friendly, helpful robot. "
-                    "Demonstrate your capabilities succinctly. "
-                    "Your output is spoken aloud; avoid special formatting. "
-                    "Keep your answers brief. "
-                    "Start by introducing yourself."
-                    + (
-                        " If speaker names are saved, greet the group without assigning a "
-                        "voice until someone speaks. Otherwise ask one person to introduce "
-                        "themselves with their name and a short sentence, then ask if anybody "
-                        "else is joining. Introductions are spoken, without buttons."
-                        if diarization
-                        else ""
-                    )
-                ),
+                "content": initial_prompt(diarization is not None),
             }
         ]
     )

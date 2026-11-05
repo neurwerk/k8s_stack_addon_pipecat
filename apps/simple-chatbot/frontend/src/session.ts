@@ -162,11 +162,11 @@ export function initializeSession(
   onClient: (client: PipecatClient) => void,
   onModel: (model: string) => void,
   onTimings: (timings: TurnTiming[]) => void,
-  onSpeaking: (speaking: boolean) => void,
   onNotices: (notices: string[]) => void,
   onErrors: (errors: ChatError[]) => void,
   onPaused: (paused: boolean) => void,
   onActivity: (activity: PipelineActivity | undefined) => void,
+  onInitialPrompt: (prompt: string) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -262,7 +262,6 @@ export function initializeSession(
     attempt.controlPending = undefined;
     if (attempt.polling) clearInterval(attempt.polling);
     if (active === attempt) {
-      onSpeaking(false);
       onActivity(endActivity(attempt.activity));
       attempt.timings = attempt.timings.map((timing) =>
         ["complete", "no-audio", "failed", "interrupted"].includes(timing.status)
@@ -379,16 +378,12 @@ export function initializeSession(
       },
       onBotStartedSpeaking: () => {
         if (current() && !attempt.paused) {
-          onSpeaking(true);
           if (attempt.recoverableError) {
             attempt.recoverableError = false;
             callError.hidden = true;
             status.textContent = "Connected.";
           }
         }
-      },
-      onBotStoppedSpeaking: () => {
-        if (current()) onSpeaking(false);
       },
       onConnected: () => {
         if (current()) attempt.mediaConnected = true;
@@ -581,7 +576,6 @@ export function initializeSession(
     onActivity(undefined);
     onNotices([]);
     onErrors([]);
-    onSpeaking(false);
     callError.textContent = "";
     callError.hidden = true;
     start.disabled = true;
@@ -682,6 +676,7 @@ export function initializeSession(
     if (typeof data.model !== "string" || !data.model.trim())
       throw new Error("Invalid model configuration");
     onModel(data.model);
+    onInitialPrompt(typeof data.initialPrompt === "string" ? data.initialPrompt : "");
     csrf = data.csrf;
     logout.hidden = false;
     sessionsEnabled = data.sessionsEnabled === true;
@@ -732,7 +727,6 @@ export function initializeSession(
       onPaused(true);
       audio.pause();
       enableAudio.hidden = true;
-      onSpeaking(false);
       void attempt.websocketAudio?.interruptBotAudio().catch(() => {
         if (owns(attempt)) void stopCurrent();
       });

@@ -36,7 +36,7 @@ function delay(ms: number | undefined, goalMs?: number) {
     : percent >= 150 ? "orange" : percent > 100 ? "yellow" : undefined;
   return (
     <span className={color(severity)}>
-      {duration(ms)} <span className="text-xs">({Math.round(percent)}% of goal)</span>
+      {duration(ms)}
       {severity && <span className="sr-only">, {severity} delay</span>}
     </span>
   );
@@ -56,7 +56,7 @@ function throughput(value: number | undefined, target: number, enoughAudio: bool
     : percent < 75 ? "orange" : percent < 100 ? "yellow" : undefined;
   return (
     <span className={color(severity)}>
-      {value.toFixed(1)} <span className="text-xs">({Math.round(percent)}% of target)</span>
+      {value.toFixed(1)}
       {severity && <span className="sr-only">, {severity} throughput</span>}
     </span>
   );
@@ -64,31 +64,17 @@ function throughput(value: number | undefined, target: number, enoughAudio: bool
 
 export function TimingPanel({
   timings,
-  speaking,
 }: {
   timings: TurnTiming[];
-  speaking: boolean;
 }) {
   return (
     <details className="rounded-xl border bg-card p-5">
       <summary className="cursor-pointer font-medium">Response timings</summary>
-      <p className="mt-2 text-xs text-muted-foreground">
-          Speaking signal: {speaking ? "active" : "inactive"} (server output, not speaker playback)
-      </p>
-      <p className="mt-2 text-xs text-muted-foreground">
-        First-audio estimate goal: 1 s; TTS first-audio goal: 0.8 s. These are local targets, not service guarantees. {" "}
-        <span className="text-amber-700 dark:text-amber-400">Yellow &gt; 100%</span>,{" "}
-        <span className="text-orange-700 dark:text-orange-400">orange ≥ 150%</span>,{" "}
-        <span className="text-red-700 dark:text-red-400">red ≥ 200%</span> of each goal.
-        STT rate targets: 10 words/s and 4 audio s/s; below target is yellow,
-        below 75% orange, below 50% red. Samples under 8 words or 3 s of audio are not graded for rate.
-      </p>
       {timings.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">Timings appear when a conversation starts.</p>
       ) : (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-left text-sm tabular-nums">
-            <caption className="sr-only">Last eight responses, newest first. Missing measurements are shown as a dash.</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
                 <th scope="col" className="p-2">Response</th>
@@ -135,22 +121,6 @@ export function TimingPanel({
           </table>
         </div>
       )}
-      <details className="mt-3 text-xs text-muted-foreground">
-        <summary className="cursor-pointer">How timings are measured</summary>
-        <p className="mt-2">
-        STT includes the transcription request and response; words are counted by whitespace.
-        Audio s/s above 1 means faster than real time, including segment padding.
-        Speaker finalization measures the end-of-segment flush request to finalized speaker results,
-        including queued audio and network time; it overlaps STT and is not total model compute time.
-        Speaker wait is only the extra wait after transcription, zero when results are already ready.
-        STT and speaker measurements are summed across segments in each reply; missing measurements show a dash.
-        LLM measures request to first usable text. Text buffering measures first text to the first speech request.
-        TTS measures that request to first valid PCM audio. Text → audio includes buffering and TTS;
-        it is not an extra stage. Network time is included; end-of-speech detection and browser playback are not.
-        The first-audio estimate adds STT, extra speaker wait, LLM first text, and text → audio;
-        it does not measure pauses between sentences.
-        </p>
-      </details>
     </details>
   );
 }

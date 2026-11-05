@@ -18,6 +18,7 @@ files:
 - simple_chatbot/diarization.py
 - simple_chatbot/bot.py
 - simple_chatbot/notices.py
+- simple_chatbot/prompts.py
 - simple_chatbot/server.py
 - simple_chatbot/services.py
 - simple_chatbot/speaker_transcripts.py

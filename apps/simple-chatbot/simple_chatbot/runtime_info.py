@@ -69,7 +69,8 @@ def configured_models(settings: Settings) -> dict[str, dict]:
         if speech:
             host = hostname(speech.base_url)
             models[stage] = dict(
-                model=speech.model,
+                model=speech.model_name or speech.model,
+                revision=speech.model_revision,
                 hosting=hosting(host),
                 host=host,
                 compute=speech.compute or "Unknown",
@@ -78,11 +79,12 @@ def configured_models(settings: Settings) -> dict[str, dict]:
     if settings.diarization:
         host = hostname(settings.diarization.url)
         models["diarization"] = dict(
-            model="Nemotron",
+            model=settings.diarization.model_name or "Not reported",
+            revision=settings.diarization.model_revision,
             hosting=hosting(host),
             host=host,
-            compute="Unknown",
-            evidence="Configured endpoint",
+            compute=settings.diarization.compute or "Unknown",
+            evidence="Configured bot settings",
         )
     # The platform's canonical remote/<provider>/<model> namespace identifies
     # the selected route; it does not claim knowledge of the provider's hardware.

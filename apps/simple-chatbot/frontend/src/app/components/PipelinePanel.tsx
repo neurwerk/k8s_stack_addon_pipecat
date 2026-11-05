@@ -5,15 +5,15 @@ const nodes: Record<Stage, { title: string; x: number; y: number }> = {
   input: { title: "Microphone input", x: 0, y: 0 },
   vad: { title: "Voice activity", x: 220, y: 0 },
   turn: { title: "End of turn", x: 440, y: 0 },
-  diarization: { title: "Speaker recognition", x: 0, y: 190 },
-  stt: { title: "Transcription", x: 220, y: 190 },
-  attribution: { title: "Speaker attribution", x: 440, y: 190 },
-  ready: { title: "Ready to answer", x: 660, y: 85 },
-  llm: { title: "Language model", x: 880, y: 85 },
-  tool: { title: "Speaker tools", x: 880, y: 330 },
-  buffer: { title: "Sentence buffer", x: 660, y: 400 },
-  tts: { title: "Speech synthesis", x: 440, y: 400 },
-  output: { title: "Audio output", x: 220, y: 400 },
+  diarization: { title: "Speaker recognition", x: 0, y: 160 },
+  stt: { title: "Transcription", x: 220, y: 160 },
+  attribution: { title: "Speaker attribution", x: 440, y: 160 },
+  ready: { title: "Ready to answer", x: 660, y: 70 },
+  llm: { title: "Language model", x: 880, y: 70 },
+  tool: { title: "Speaker tools", x: 880, y: 280 },
+  buffer: { title: "Sentence buffer", x: 660, y: 340 },
+  tts: { title: "Speech synthesis", x: 440, y: 340 },
+  output: { title: "Audio output", x: 220, y: 340 },
 };
 const colors: Record<Status, string> = {
   active: "bg-primary text-primary-foreground border-primary",
@@ -23,15 +23,15 @@ const colors: Record<Status, string> = {
   failed: "bg-destructive/10 text-destructive border-destructive",
   off: "bg-muted/40 text-muted-foreground border-border",
 };
-const symbols: Record<Status, string> = { active: "●", waiting: "○", complete: "✓", interrupted: "↯", failed: "!", off: "—" };
+const symbols: Record<Status, string> = { active: "●", waiting: "○", complete: "✓", interrupted: "↯", failed: "!", off: "" };
 const paths = [
-  "M190 65 H220", "M410 65 H440", "M95 160 V190",
-  "M190 110 H205 V175 H315 V190", "M315 160 V190",
-  "M410 255 H440", "M190 285 H210 V370 H535 V350",
-  "M630 65 H650 V125 H660", "M630 255 H650 V180 H660",
-  "M850 155 H880", "M975 245 V280 H755 V400",
-  "M660 470 H630", "M440 470 H410", "M965 245 V330",
-  "M1000 330 V265 H1025 V245",
+  "M190 55 H220", "M410 55 H440", "M95 130 V160",
+  "M190 90 H205 V145 H315 V160", "M315 130 V160",
+  "M410 215 H440", "M190 245 H210 V310 H535 V290",
+  "M630 55 H650 V105 H660", "M630 215 H650 V150 H660",
+  "M850 125 H880", "M975 200 V235 H755 V340",
+  "M660 395 H630", "M440 395 H410", "M965 200 V280",
+  "M1000 280 V220 H1025 V200",
 ];
 
 export function PipelinePanel({ activity, micEnabled, paused }: { activity?: PipelineActivity; micEnabled: boolean; paused: boolean }) {
@@ -60,20 +60,16 @@ export function PipelinePanel({ activity, micEnabled, paused }: { activity?: Pip
       </div>}
       <div className="pipeline-layout mt-4" aria-label="Pipeline dependency graph">
         <div className="pipeline-graph">
-          <svg aria-hidden="true" className="pipeline-edges text-muted-foreground" viewBox="0 0 1070 570">
+          <svg aria-hidden="true" className="pipeline-edges text-muted-foreground" viewBox="0 0 1070 480">
             <defs><marker id="pipeline-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="currentColor" /></marker></defs>
             {paths.map((path) => <path key={path} d={path} fill="none" stroke="currentColor" strokeWidth="1.5" markerEnd="url(#pipeline-arrow)" />)}
-            <text x="325" y="166" fontSize="11" fill="currentColor">pause</text>
-            <text x="770" y="262" fontSize="11" fill="currentColor">streamed text</text>
-            <text x="886" y="300" fontSize="11" fill="currentColor">optional tool ↔ follow-up</text>
-            <text x="20" y="390" fontSize="11" fill="currentColor">VAD stays enabled during replies.</text>
           </svg>
           {stages.map((stage) => {
             const node = nodes[stage];
             const state = activity?.states[stage];
             const status = conversationPaused || (!live && state?.status === "active") ? "off" : state?.status ?? "off";
             const label = conversationPaused ? "Conversation paused" : stage === "input" && live && !micEnabled ? "Microphone muted in browser" : state?.label ?? "Awaiting conversation";
-            return <div key={stage} className={`pipeline-node rounded-lg border p-3 shadow-sm ${colors[status]}`} style={{ "--node-x": `${node.x / 1070 * 100}%`, "--node-y": `${node.y / 570 * 100}%` } as CSSProperties}>
+            return <div key={stage} className={`pipeline-node rounded-lg border px-3 py-2 shadow-sm ${colors[status]}`} style={{ "--node-x": `${node.x / 1070 * 100}%`, "--node-y": `${node.y / 480 * 100}%` } as CSSProperties}>
               <h3 className="text-sm font-semibold">{node.title}</h3>
               <p className="mt-1 text-xs" aria-label={`${status}: ${label}`}>{symbols[status]} {label}</p>
               {stage === "input" || stage === "output" || !activity?.models[stage] ? <p className="mt-2 text-[11px] opacity-70">{stage === "input" ? "Browser → app" : stage === "output" ? "App → browser · playback unmeasured" : "App process"}</p> : null}
@@ -134,7 +130,9 @@ export function ModelLocations({ activity }: { activity?: PipelineActivity }) {
             if (!model) return null;
             return <tr key={stage} className="border-t align-top">
               <th scope="row" className="p-2 font-medium">{nodes[stage].title}</th>
-              <td className="p-2">{model.model}</td>
+              <td className="break-words p-2">{model.model}
+                {model.revision && <span className="block break-all text-xs text-muted-foreground">Revision: {model.revision}</span>}
+              </td>
               <td className="p-2">{stage === "llm" ? `Configured route: ${model.host}` : model.hosting === "pod" || model.hosting === "node" ? `${model.hosting}: ${model.host}` : `${model.hosting} (${model.host})`}
                 {model.via && <span className="block text-xs text-muted-foreground">Via gateway: {model.via}</span>}
                 {model.upstream_provider && <span className="block text-xs text-muted-foreground">Last response reported provider: {model.upstream_provider}</span>}

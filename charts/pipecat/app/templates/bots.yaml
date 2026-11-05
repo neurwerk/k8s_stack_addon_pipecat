@@ -47,6 +47,8 @@
 {{- if $speech.voice }}{{ $_ := set $service "voice" $speech.voice }}{{ end }}
 {{- if $speech.language }}{{ $_ := set $service "language" $speech.language }}{{ end }}
 {{- if $speech.compute }}{{ $_ := set $service "compute" $speech.compute }}{{ end }}
+{{- if $speech.modelName }}{{ $_ := set $service "model_name" $speech.modelName }}{{ end }}
+{{- if $speech.modelRevision }}{{ $_ := set $service "model_revision" $speech.modelRevision }}{{ end }}
 {{- if $speech.secretRef }}
 {{- if and (hasPrefix "pipecat-bot-" $speech.secretRef.name) (or (ne $speech.secretRef.name (printf "pipecat-bot-%s" $bot.id)) (ne $speech.secretRef.key (printf "%sApiKey" $kind))) }}{{ fail "Managed speech Secret references must match their bot and speech field" }}{{ end }}
 {{- $_ := set $credentials $kind $speech.secretRef }}
@@ -58,7 +60,11 @@
 {{- with $bot.diarization }}
 {{- if and (hasPrefix "pipecat-bot-" .secretRef.name) (or (ne .secretRef.name (printf "pipecat-bot-%s" $bot.id)) (ne .secretRef.key "diarizationApiKey")) }}{{ fail "Managed diarization Secret references must match their bot and diarizationApiKey field" }}{{ end }}
 {{- $_ := set $credentials "diarization" .secretRef }}
-{{- $_ := set $config "diarization" (dict "url" .url "key" (dict "file" "/credentials/diarization/value") "profile_ttl_seconds" (.profileTtlSeconds | default 86400) "timeout_seconds" (.timeoutSeconds | default 15)) }}
+{{- $service := dict "url" .url "key" (dict "file" "/credentials/diarization/value") "profile_ttl_seconds" (.profileTtlSeconds | default 86400) "timeout_seconds" (.timeoutSeconds | default 15) }}
+{{- if .modelName }}{{ $_ := set $service "model_name" .modelName }}{{ end }}
+{{- if .modelRevision }}{{ $_ := set $service "model_revision" .modelRevision }}{{ end }}
+{{- if .compute }}{{ $_ := set $service "compute" .compute }}{{ end }}
+{{- $_ := set $config "diarization" $service }}
 {{- end }}
 {{- if $bot.iceSecretRef }}
 {{- $_ := set $credentials "ice" $bot.iceSecretRef }}
