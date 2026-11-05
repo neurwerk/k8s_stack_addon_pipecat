@@ -3,7 +3,7 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.2.5
+  version: 0.2.6
   # Runtime 0.2.2 and tooling 0.2.4 publication and anonymous linux/amd64 pulls verified.
   status: ready
   sourceName: pipecat-addon

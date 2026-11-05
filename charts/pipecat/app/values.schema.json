@@ -60,6 +60,7 @@
         "model": {"type": "string", "minLength": 1, "maxLength": 200},
         "voice": {"type": "string", "minLength": 1},
         "language": {"type": "string", "minLength": 1},
+        "compute": {"enum": ["CPU", "GPU"]},
         "secretRef": {"$ref": "#/definitions/secret"}
       }
     },

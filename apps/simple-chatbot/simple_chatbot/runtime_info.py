@@ -25,7 +25,7 @@ def hosting(host: str) -> str:
     try:
         address = ipaddress.ip_address(host)
         if address.is_private and not address.is_loopback and not address.is_link_local:
-            return "Our private server"
+            return "Private server"
     except ValueError:
         pass
     # A public address or arbitrary DNS name does not establish ownership.
@@ -55,7 +55,9 @@ def onnx_session_metadata(providers: list[str]) -> dict[str, str]:
 
 
 def configured_models(settings: Settings) -> dict[str, dict]:
-    location = "Our Kubernetes" if os.environ.get("KUBERNETES_SERVICE_HOST") else "App host"
+    location = "pod" if os.environ.get("KUBERNETES_SERVICE_HOST") else "App host"
+    if os.environ.get("NODE_NAME"):
+        location = "node"
     host = os.environ.get("NODE_NAME") or socket.gethostname()
     detail = "Node" if os.environ.get("NODE_NAME") else "App host / pod"
     local = dict(hosting=location, host=host[:253], compute="Unknown", evidence=detail)
@@ -70,8 +72,8 @@ def configured_models(settings: Settings) -> dict[str, dict]:
                 model=speech.model,
                 hosting=hosting(host),
                 host=host,
-                compute="Unknown",
-                evidence="Configured endpoint",
+                compute=speech.compute or "Unknown",
+                evidence="Configured bot settings" if speech.compute else "Configured endpoint",
             )
     if settings.diarization:
         host = hostname(settings.diarization.url)
@@ -154,6 +156,6 @@ async def refresh_models(
                 *(health_metadata(http, url) for url in endpoints.values())
             )
             for stage, result in zip(endpoints, results, strict=True):
-                # Never retain a stale GPU claim after a failed refresh.
+                # A failed refresh returns to configuration, not stale health metadata.
                 activity.models[stage] = {**baseline[stage], **result}
             await asyncio.sleep(60)

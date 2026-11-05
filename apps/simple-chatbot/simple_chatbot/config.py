@@ -35,6 +35,7 @@ class Speech(BaseModel):
     key: SecretRef | None = None
     voice: str = "alloy"
     language: str = "en"
+    compute: Literal["CPU", "GPU"] | None = None
 
 
 class OIDC(BaseModel):

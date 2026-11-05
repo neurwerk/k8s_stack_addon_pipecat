@@ -46,6 +46,7 @@
 {{- $service := dict "base_url" $speech.baseUrl "model" $speech.model }}
 {{- if $speech.voice }}{{ $_ := set $service "voice" $speech.voice }}{{ end }}
 {{- if $speech.language }}{{ $_ := set $service "language" $speech.language }}{{ end }}
+{{- if $speech.compute }}{{ $_ := set $service "compute" $speech.compute }}{{ end }}
 {{- if $speech.secretRef }}
 {{- if and (hasPrefix "pipecat-bot-" $speech.secretRef.name) (or (ne $speech.secretRef.name (printf "pipecat-bot-%s" $bot.id)) (ne $speech.secretRef.key (printf "%sApiKey" $kind))) }}{{ fail "Managed speech Secret references must match their bot and speech field" }}{{ end }}
 {{- $_ := set $credentials $kind $speech.secretRef }}
