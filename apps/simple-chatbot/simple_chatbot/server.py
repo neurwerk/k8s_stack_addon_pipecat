@@ -27,6 +27,7 @@ from simple_chatbot.config import (
     server_ice,
 )
 from simple_chatbot.diarization import DiarizationSession
+from simple_chatbot.prompts import initial_prompt
 from simple_chatbot.webrtc import BrowserWebRTCConnection as SmallWebRTCConnection
 
 
@@ -249,6 +250,7 @@ def create_app(settings: Settings) -> FastAPI:
             )
             if settings.anonymous or session.signed_in:
                 result["model"] = settings.model_id
+                result["initialPrompt"] = initial_prompt(settings.diarization is not None)
         response.body = JSONResponse(result).body
         response.headers["content-length"] = str(len(response.body))
         return response

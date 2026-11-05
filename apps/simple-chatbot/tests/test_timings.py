@@ -13,8 +13,10 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    InputAudioRawFrame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -68,6 +70,62 @@ class TimingTests(unittest.IsolatedAsyncioTestCase):
         greeting = await other.begin_llm()
         self.assertEqual((greeting.turn, greeting.kind, greeting.values), (1, "greeting", {}))
         self.assertIsNone(self.timings.pending)
+
+    async def test_pause_cancels_delayed_transcript_and_discards_partial_utterance(self):
+        started = asyncio.Event()
+        delivered = asyncio.Event()
+        release = asyncio.Event()
+        transcripts = []
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200))
+        ) as http:
+            stt = HTTPSTT(self.config.stt, http)
+            stt.create_task = lambda coro: asyncio.create_task(coro)
+
+            async def cancel(task):
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            stt.cancel_task = cancel
+
+            async def transcribe(audio):
+                if audio == b"old":
+                    started.set()
+                    await release.wait()
+                yield TranscriptionFrame(audio.decode(), "", "synthetic")
+
+            async def push(frame, direction=FrameDirection.DOWNSTREAM):
+                if isinstance(frame, TranscriptionFrame):
+                    transcripts.append(frame.text)
+                    delivered.set()
+
+            stt.run_stt = transcribe
+            stt.push_frame = push
+            stt._segment_task = stt.create_task(stt._segment_task_handler())
+            await stt._segment_queue.put(b"old")
+            await asyncio.wait_for(started.wait(), 1)
+            stt._audio_buffer.extend(b"partial speech")
+            stt._user_speaking = True
+            await stt._segment_queue.put(b"also old")
+            await stt.pause_input()
+            await stt.pause_input()
+            await stt.process_audio_frame(
+                InputAudioRawFrame(b"during pause", 16000, 1), FrameDirection.DOWNSTREAM
+            )
+            self.assertEqual(stt._audio_buffer, b"")
+            self.assertFalse(stt._user_speaking)
+            stt.resume_input()
+            task = stt._segment_task
+            stt.resume_input()
+            self.assertIs(stt._segment_task, task)
+            release.set()
+            await stt._segment_queue.put(b"fresh")
+            await asyncio.wait_for(delivered.wait(), 1)
+            self.assertEqual(transcripts, ["fresh"])
+            await stt.pause_input()
 
     async def test_llm_first_text_excludes_headers_reasoning_and_controls(self):
         owner = self

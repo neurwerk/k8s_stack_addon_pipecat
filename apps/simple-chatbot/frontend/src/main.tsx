@@ -4,6 +4,7 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 import {
   PipecatClientProvider,
   usePipecatClientTransportState,
+  usePipecatClientMicControl,
 } from "@pipecat-ai/client-react";
 import {
   SmallWebRTCTransport,
@@ -16,29 +17,35 @@ import { ConnectButtonView } from "@/components/pipecat/connect-button";
 import { Button } from "@/components/ui/button";
 import { ConversationPanel } from "@/app/components/ConversationPanel";
 import { TimingPanel } from "@/app/components/TimingPanel";
+import { ActivityTimeline, ModelLocations, PipelinePanel } from "@/app/components/PipelinePanel";
+import type { PipelineActivity } from "./activity";
 import { version } from "../package.json";
 import type { TurnTiming } from "./timings";
 import { initializeSession, type ChatError } from "./session";
 import "./app/globals.css";
 import "./style.css";
 
-function MicrophoneControl() {
+function MicrophoneControl({ paused }: { paused: boolean }) {
   const state = usePipecatClientTransportState();
   const connected = state === "connected" || state === "ready";
   return (
     <UserAudioControl
       size="lg"
-      unavailableText={connected ? undefined : "Microphone off"}
+      unavailableText={
+        paused ? "Conversation paused" : connected ? undefined : "Microphone off"
+      }
     />
   );
 }
 
 function App() {
   const [model, setModel] = useState("");
+  const [initialPrompt, setInitialPrompt] = useState("");
   const [timings, setTimings] = useState<TurnTiming[]>([]);
-  const [speaking, setSpeaking] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
   const [errors, setErrors] = useState<ChatError[]>([]);
+  const [activity, setActivity] = useState<PipelineActivity>();
   // No device initialization before an explicit Start click and admission check.
   const [client, setClient] = useState(
     () =>
@@ -50,7 +57,10 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors), []);
+  useEffect(
+    () => initializeSession(setClient, setModel, setTimings, setNotices, setErrors, setPaused, setActivity, setInitialPrompt),
+    [],
+  );
 
   return (
     <PipecatClientProvider client={client}>
@@ -131,7 +141,7 @@ function App() {
                   <option value="websocket">HTTPS WebSocket</option>
                 </select>
               </label>
-              <MicrophoneControl />
+              <MicrophoneControl paused={paused} />
               <ConnectButtonView id="connect" disabled size="lg">
                 Start conversation
               </ConnectButtonView>
@@ -143,6 +153,9 @@ function App() {
               >
                 End
               </ConnectButtonView>
+              <Button id="pause" disabled variant="outline">
+                Pause
+              </Button>
               <button id="mute" hidden type="button">
                 Mute microphone
               </button>
@@ -153,14 +166,28 @@ function App() {
           </div>
           <audio id="audio" hidden />
         </section>
+        <details className="rounded-xl border bg-card px-5 py-3">
+          <summary className="cursor-pointer text-sm font-medium">Initial prompt</summary>
+          <p className="mt-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+            {initialPrompt || "Initial prompt unavailable."}
+          </p>
+        </details>
         <ConversationPanel model={model} notices={notices} errors={errors} className="min-h-96 flex-1" />
-        <TimingPanel timings={timings} speaking={speaking} />
+        <LivePipeline activity={activity} paused={paused} />
+        <TimingPanel timings={timings} />
+        <ActivityTimeline activity={activity} />
+        <ModelLocations activity={activity} />
         <footer className="text-center text-xs text-muted-foreground">
           Demo Assistant v{version} · Built with Pipecat and Pipecat UI
         </footer>
       </main>
     </PipecatClientProvider>
   );
+}
+
+function LivePipeline({ activity, paused }: { activity?: PipelineActivity; paused: boolean }) {
+  const { isMicEnabled } = usePipecatClientMicControl();
+  return <PipelinePanel activity={activity} micEnabled={isMicEnabled} paused={paused} />;
 }
 
 const root = document.getElementById("root");

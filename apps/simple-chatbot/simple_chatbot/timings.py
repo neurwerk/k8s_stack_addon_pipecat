@@ -4,6 +4,8 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from simple_chatbot.activity import Activity
+
 TimingSink = Callable[[dict], Awaitable[None]]
 
 
@@ -42,6 +44,20 @@ class TurnTiming:
             self.values["audio_seconds"] = self.values.get("audio_seconds", 0) + audio_seconds
         await self.publish()
 
+    async def speakers_finalized(
+        self, finalization_seconds: float | None, wait_seconds: float
+    ) -> None:
+        if self.finished:
+            return
+        if finalization_seconds is not None:
+            self.values["diarization_finalize_ms"] = (
+                self.values.get("diarization_finalize_ms", 0) + finalization_seconds * 1000
+            )
+        self.values["diarization_wait_ms"] = (
+            self.values.get("diarization_wait_ms", 0) + wait_seconds * 1000
+        )
+        await self.publish()
+
     async def first_text(self) -> None:
         if self.finished or self.first_text_at is not None or self.llm_started is None:
             return
@@ -76,8 +92,9 @@ class TurnTiming:
 
 
 class TurnTimings:
-    def __init__(self, send: TimingSink):
+    def __init__(self, send: TimingSink, activity: Activity | None = None):
         self.send = send
+        self.activity = activity
         self.sequence = 0
         self.pending: TurnTiming | None = None
 

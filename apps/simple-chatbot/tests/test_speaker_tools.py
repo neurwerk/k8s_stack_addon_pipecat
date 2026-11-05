@@ -18,7 +18,9 @@ from simple_chatbot.services import GatewayLLM, bounded_sse
 from simple_chatbot.speakers import SpeakerProfiles
 
 
-def tool_event(name="remember_speaker", arguments='{"name":"Alice"}', *, index=0):
+def tool_event(
+    name="remember_speaker", arguments='{"name":"Alice","quote":"My name is Alice"}', *, index=0
+):
     return {
         "choices": [
             {
@@ -39,7 +41,7 @@ def tool_event(name="remember_speaker", arguments='{"name":"Alice"}', *, index=0
     }
 
 
-def tool_response(name="remember_speaker", arguments='{"name":"Alice"}'):
+def tool_response(name="remember_speaker", arguments='{"name":"Alice","quote":"My name is Alice"}'):
     return sse(tool_event(name, arguments), event(None, finish="tool_calls"))
 
 
@@ -52,7 +54,10 @@ def response(payload):
 class SpeakerToolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.profiles = SpeakerProfiles()
-        self.profiles.observe(["speaker_2"])
+        self.profiles.observe(
+            [("speaker_2", word) for word in ("My", "name", "is", "Alice")],
+            ["speaker_2"] * 4,
+        )
         self.requests = []
         self.notices = []
         self.context = LLMContext(
@@ -102,7 +107,9 @@ class SpeakerToolTests(unittest.IsolatedAsyncioTestCase):
                         "tool_calls": [
                             {
                                 "index": 0,
-                                "function": {"arguments": 'me":"Alice"}'},
+                                "function": {
+                                    "arguments": 'me":"Alice","quote":"My name is Alice"}'
+                                },
                             }
                         ]
                     },
@@ -138,8 +145,11 @@ class SpeakerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_extra_arbitrary_ids_and_malformed_arguments_cannot_mutate(self):
         for name, arguments in (
-            ("remember_speaker", '{"name":"Alice","speaker_id":"speaker_7"}'),
-            ("remember_speaker", '{"name":"Alice","turn":1}'),
+            (
+                "remember_speaker",
+                '{"name":"Alice","quote":"My name is Alice","speaker_id":"speaker_7"}',
+            ),
+            ("remember_speaker", '{"name":"Alice","quote":"My name is Alice","turn":1}'),
             ("remember_speaker", '{"speaker_id":"speaker_7"}'),
             ("remember_speaker", '{"name":123}'),
             ("remember_speaker", "[]"),
@@ -165,13 +175,16 @@ class SpeakerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stale_turn_or_generation_rejects_register_and_forget(self):
         for name, arguments in (
-            ("remember_speaker", '{"name":"Alice"}'),
+            ("remember_speaker", '{"name":"Alice","quote":"My name is Alice"}'),
             ("forget_speakers", "{}"),
         ):
-            for change in (lambda: self.profiles.observe(["speaker_7"]), self.profiles.clear):
+            for change in (
+                lambda: self.profiles.observe([("speaker_7", "Hi")]),
+                self.profiles.clear,
+            ):
                 with self.subTest(name=name, change=change):
                     self.requests.clear()
-                    self.profiles.observe(["speaker_2"])
+                    self.profiles.observe([("speaker_2", "Hi")])
                     forget = AsyncMock()
                     await self.run_response(
                         [
@@ -189,7 +202,13 @@ class SpeakerToolTests(unittest.IsolatedAsyncioTestCase):
         for speakers in (["speaker_1", "speaker_2"], [None], ["arbitrary-id"]):
             with self.subTest(speakers=speakers):
                 self.requests.clear()
-                self.profiles.observe(speakers)
+                self.profiles.begin_response()
+                self.profiles.observe(
+                    [
+                        (speaker, word)
+                        for speaker, word in zip(speakers, ("My", "name"), strict=False)
+                    ]
+                )
                 await self.run_response(
                     [
                         tool_response(),

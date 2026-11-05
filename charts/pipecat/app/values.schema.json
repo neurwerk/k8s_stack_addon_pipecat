@@ -58,8 +58,11 @@
       "properties": {
         "baseUrl": {"type": "string", "pattern": "^https?://[^?#]+$"},
         "model": {"type": "string", "minLength": 1, "maxLength": 200},
+        "modelName": {"type": "string", "minLength": 1, "maxLength": 200},
+        "modelRevision": {"type": "string", "minLength": 1, "maxLength": 200},
         "voice": {"type": "string", "minLength": 1},
         "language": {"type": "string", "minLength": 1},
+        "compute": {"enum": ["CPU", "GPU"]},
         "secretRef": {"$ref": "#/definitions/secret"}
       }
     },
@@ -67,6 +70,9 @@
       "type": "object", "additionalProperties": false, "required": ["url", "secretRef"],
       "properties": {
         "url": {"type": "string", "pattern": "^wss?://[^\\s/?#@]+/v1/diarization/stream$"},
+        "modelName": {"type": "string", "minLength": 1, "maxLength": 200},
+        "modelRevision": {"type": "string", "minLength": 1, "maxLength": 200},
+        "compute": {"enum": ["CPU", "GPU"]},
         "secretRef": {"$ref": "#/definitions/secret"},
         "profileTtlSeconds": {"type": "integer", "minimum": 60, "maximum": 86400, "default": 86400},
         "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 15}

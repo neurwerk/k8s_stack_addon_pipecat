@@ -12,6 +12,8 @@ export const timingStatuses: Record<string, string> = {
 
 const metricKeys = [
   "stt_ms",
+  "diarization_finalize_ms",
+  "diarization_wait_ms",
   "words",
   "audio_seconds",
   "llm_first_text_ms",

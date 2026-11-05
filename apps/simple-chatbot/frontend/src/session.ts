@@ -8,6 +8,7 @@ import {
   WavMediaManager,
 } from "@pipecat-ai/small-webrtc-transport";
 import { parseTiming, type TurnTiming } from "./timings";
+import { endActivity, parseActivity, type PipelineActivity } from "./activity";
 
 export interface ChatError {
   text: string;
@@ -18,40 +19,105 @@ export interface ChatError {
 // permanently ignores a track once interrupted, and its retiring worklet can
 // discard audio sent before it stops. Give each playback a new ID and hold
 // incoming chunks until the old worklet has been detached.
-function websocketAudioManager() {
+function websocketAudioManager(isPaused: () => boolean) {
   const manager = new WavMediaManager(512, 16000);
   const buffer = manager.bufferBotAudio.bind(manager);
   const interrupt = manager.interruptBotAudio.bind(manager);
+  // The pinned player's offset poll has no timeout. Use its worklet protocol
+  // directly so a missing acknowledgement fails the call, not the next reply.
+  const player = Reflect.get(manager, "_wavStreamPlayer") as {
+    stream: AudioWorkletNode | null;
+    context: AudioContext;
+    analyser: AnalyserNode;
+    interruptedTrackIds: Record<string, boolean>;
+    trackSampleOffsets: Record<string, unknown>;
+    getTrackSampleOffset: (interrupt?: boolean) => Promise<unknown>;
+  };
+  const getOffset = player.getTrackSampleOffset.bind(player);
+  player.getTrackSampleOffset = (stop = false) => {
+    if (!stop || !player.stream) return getOffset(stop);
+    const stream = player.stream;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const finish = () => {
+        clearTimeout(timer);
+        stream.port.removeEventListener("message", onMessage);
+        delete player.trackSampleOffsets[requestId];
+      };
+      const onMessage = (event: MessageEvent) => {
+        const data: unknown = event.data;
+        if (!object(data) || data.event !== "offset" || data.requestId !== requestId) return;
+        finish();
+        if (typeof data.trackId === "string") player.interruptedTrackIds[data.trackId] = true;
+        resolve(data);
+      };
+      const timer = setTimeout(() => {
+        finish();
+        reject(new Error("Bot audio interruption timed out"));
+      }, 1500);
+      stream.port.addEventListener("message", onMessage);
+      stream.port.postMessage({ event: "interrupt", requestId });
+    });
+  };
+  let gain: GainNode | undefined;
+  let routed: AudioWorkletNode | null = null;
+  function routeAudio(): void {
+    const stream = player.stream;
+    if (!stream) return;
+    if (!gain) {
+      gain = player.context.createGain();
+      gain.connect(player.context.destination);
+    }
+    if (routed !== stream) {
+      stream.disconnect();
+      stream.connect(gain);
+      stream.connect(player.analyser);
+      routed = stream;
+    }
+    gain.gain.value = isPaused() ? 0 : 1;
+  }
   let playback = 0;
   let interrupting: Promise<void> | undefined;
   let pending: Int16Array[] = [];
 
   manager.bufferBotAudio = (data: Int16Array, id?: string) => {
+    if (isPaused()) return;
     if (interrupting) {
       if (pending.length >= 128) throw new Error("Bot audio queue full");
       pending.push(data);
       return;
     }
-    return buffer(data, id ?? `reply-${playback}`);
+    const result = buffer(data, id ?? `reply-${playback}`);
+    routeAudio();
+    return result;
   };
   manager.interruptBotAudio = () => {
+    if (isPaused()) {
+      // Mute synchronously, keeping the worklet alive for its interrupt reply.
+      pending = [];
+      if (gain) gain.gain.value = 0;
+    }
     if (interrupting) return interrupting;
     playback++;
+    const retiringStream = player.stream;
     interrupting = (async () => {
       try {
         await interrupt();
       } finally {
         // The pinned player does not expose a reset method. Its worklet sends
         // "stop" asynchronously; detach it before feeding the next reply.
-        const player = Reflect.get(manager, "_wavStreamPlayer") as {
-          stream: AudioWorkletNode | null;
-        };
-        player.stream?.disconnect();
-        player.stream = null;
+        // Its delayed "stop" handler otherwise clears the next stream too.
+        if (retiringStream) {
+          retiringStream.port.onmessage = null;
+          retiringStream.port.close();
+          retiringStream.disconnect();
+        }
+        if (player.stream === retiringStream) player.stream = null;
+        routed = null;
         const queued = pending;
         pending = [];
         interrupting = undefined;
-        for (const chunk of queued) manager.bufferBotAudio(chunk);
+        if (!isPaused()) for (const chunk of queued) manager.bufferBotAudio(chunk);
       }
     })();
     return interrupting;
@@ -96,15 +162,18 @@ export function initializeSession(
   onClient: (client: PipecatClient) => void,
   onModel: (model: string) => void,
   onTimings: (timings: TurnTiming[]) => void,
-  onSpeaking: (speaking: boolean) => void,
   onNotices: (notices: string[]) => void,
   onErrors: (errors: ChatError[]) => void,
+  onPaused: (paused: boolean) => void,
+  onActivity: (activity: PipelineActivity | undefined) => void,
+  onInitialPrompt: (prompt: string) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
   const start = element("connect", HTMLButtonElement);
   const end = element("disconnect", HTMLButtonElement);
   const mute = element("mute", HTMLButtonElement);
+  const pause = element("pause", HTMLButtonElement);
   const logout = element("logout", HTMLButtonElement);
   const audio = element("audio", HTMLAudioElement);
   const enableAudio = element("enable-audio", HTMLButtonElement);
@@ -131,7 +200,17 @@ export function initializeSession(
     timings: TurnTiming[];
     notices: string[];
     errors: ChatError[];
+    activity?: PipelineActivity;
     pollingNotices?: boolean;
+    paused: boolean;
+    controlPending?: {
+      sequence: number;
+      paused: boolean;
+      timer: ReturnType<typeof setTimeout>;
+    };
+    controlSequence: number;
+    websocketAudio?: ReturnType<typeof websocketAudioManager>;
+    micWasEnabled: boolean;
   }
   class Cancelled extends Error {}
   class MediaTimeout extends Error {}
@@ -142,13 +221,14 @@ export function initializeSession(
     if (!owns(attempt)) throw new Cancelled();
   }
   async function playAudio(attempt: Attempt): Promise<void> {
+    if (attempt.paused) return;
     const transport = attempt.transport;
     try {
       await audio.play();
-      if (owns(attempt) && attempt.transport === transport)
+      if (owns(attempt) && !attempt.paused && attempt.transport === transport)
         enableAudio.hidden = true;
     } catch {
-      if (owns(attempt) && attempt.transport === transport)
+      if (owns(attempt) && !attempt.paused && attempt.transport === transport)
         enableAudio.hidden = false;
     }
   }
@@ -178,9 +258,11 @@ export function initializeSession(
   function stop(attempt: Attempt): Promise<void> {
     if (attempt.stopped) return attempt.stopped;
     attempt.cancelled = true;
+    if (attempt.controlPending) clearTimeout(attempt.controlPending.timer);
+    attempt.controlPending = undefined;
     if (attempt.polling) clearInterval(attempt.polling);
     if (active === attempt) {
-      onSpeaking(false);
+      onActivity(endActivity(attempt.activity));
       attempt.timings = attempt.timings.map((timing) =>
         ["complete", "no-audio", "failed", "interrupted"].includes(timing.status)
           ? timing
@@ -193,6 +275,10 @@ export function initializeSession(
       start.disabled = true;
       end.disabled = true;
       mute.disabled = true;
+      pause.disabled = true;
+      pause.textContent = "Pause";
+      onPaused(false);
+      audio.pause();
       status.textContent = "Ending conversation…";
     }
     // A new Start waits for this fence: stale server cancellation cannot end its call.
@@ -250,6 +336,38 @@ export function initializeSession(
     return {
       onServerMessage: (data: unknown) => {
         if (!current()) return;
+        if (object(data) && data.type === "conversation-control") {
+          const pending = attempt.controlPending;
+          if (
+            pending &&
+            data.sequence === pending.sequence &&
+            data.paused === pending.paused
+          ) {
+            clearTimeout(pending.timer);
+            attempt.controlPending = undefined;
+            if (!pending.paused) {
+              attempt.paused = false;
+              attempt.client?.enableMic(attempt.micWasEnabled);
+              mute.disabled = false;
+              onPaused(false);
+              void playAudio(attempt);
+            }
+            pause.textContent = pending.paused ? "Resume" : "Pause";
+            pause.disabled = false;
+            status.textContent = pending.paused
+              ? "Conversation paused."
+              : "Connected. You can speak now.";
+          }
+          return;
+        }
+        const activity = parseActivity(data);
+        if (activity) {
+          if (!attempt.activity || activity.at_ms >= attempt.activity.at_ms) {
+            attempt.activity = activity;
+            onActivity(activity);
+          }
+          return;
+        }
         const timing = parseTiming(data);
         if (!timing) return;
         attempt.timings = [
@@ -259,17 +377,13 @@ export function initializeSession(
         onTimings(attempt.timings);
       },
       onBotStartedSpeaking: () => {
-        if (current()) {
-          onSpeaking(true);
+        if (current() && !attempt.paused) {
           if (attempt.recoverableError) {
             attempt.recoverableError = false;
             callError.hidden = true;
             status.textContent = "Connected.";
           }
         }
-      },
-      onBotStoppedSpeaking: () => {
-        if (current()) onSpeaking(false);
       },
       onConnected: () => {
         if (current()) attempt.mediaConnected = true;
@@ -279,6 +393,7 @@ export function initializeSession(
         participant?: { local?: boolean },
       ) => {
         if (current() && participant?.local && track.kind === "audio" && webrtc) {
+          if (attempt.paused) track.enabled = false;
           // The pinned transport only wires track replacement for its default
           // Daily manager. Its peer connection is omitted from the SDK typings.
           const { pc } = webrtc as SmallWebRTCTransport & {
@@ -300,7 +415,8 @@ export function initializeSession(
         }
         if (current() && !participant?.local && track.kind === "audio") {
           audio.srcObject = new MediaStream([track]);
-          void playAudio(attempt);
+          if (attempt.paused) audio.pause();
+          else void playAudio(attempt);
         }
       },
       onDisconnected: () => {
@@ -334,6 +450,15 @@ export function initializeSession(
           status.textContent = "Call failed. End the call and retry.";
         }
       },
+    };
+  }
+  function guardMic(attempt: Attempt): void {
+    const client = attempt.client;
+    if (!client) return;
+    const enableMic = client.enableMic.bind(client);
+    client.enableMic = (enabled: boolean) => {
+      if (enabled && attempt.paused) return;
+      enableMic(enabled);
     };
   }
   async function pollNotices(attempt: Attempt): Promise<void> {
@@ -380,6 +505,7 @@ export function initializeSession(
       enableCam: false,
       callbacks: callbacks(attempt, webrtc),
     });
+    guardMic(attempt);
     onClient(attempt.client);
     await deadline(
       attempt,
@@ -407,7 +533,7 @@ export function initializeSession(
     attempt.client = new PipecatClient({
       transport: new WebSocketTransport({
         // Match the server's 16 kHz input and the WAV player's 24 kHz output.
-        mediaManager: websocketAudioManager(),
+        mediaManager: (attempt.websocketAudio = websocketAudioManager(() => attempt.paused)),
         serializer: new ProtobufFrameSerializer(),
         recorderSampleRate: 16000,
         playerSampleRate: 24000,
@@ -416,6 +542,7 @@ export function initializeSession(
       enableCam: false,
       callbacks: callbacks(attempt),
     });
+    guardMic(attempt);
     onClient(attempt.client);
     const url = new URL(`${base}/api/websocket`, location.origin);
     url.protocol = "wss:";
@@ -438,13 +565,17 @@ export function initializeSession(
       timings: [],
       notices: [],
       errors: [],
+      paused: false,
+      controlSequence: 0,
+      micWasEnabled: true,
     };
     active = attempt;
+    onPaused(false);
     enableAudio.hidden = true;
     onTimings([]);
+    onActivity(undefined);
     onNotices([]);
     onErrors([]);
-    onSpeaking(false);
     callError.textContent = "";
     callError.hidden = true;
     start.disabled = true;
@@ -473,6 +604,8 @@ export function initializeSession(
         if (attempt.mediaConnected || attempt.serviceError || !network)
           throw error;
         await disconnectOwn(attempt);
+        attempt.activity = undefined;
+        onActivity(undefined);
         check(attempt);
         attempt.serverCancel = mutation("/api/cancel");
         const cancelled = await attempt.serverCancel;
@@ -491,6 +624,7 @@ export function initializeSession(
       if (attempt.serviceError) throw new Error("Call failed during connection");
       attempt.connecting = false;
       mute.disabled = false;
+      pause.disabled = false;
       status.textContent = `Connected using ${selected === "webrtc" ? "WebRTC" : "HTTPS WebSocket"}. You can speak now.`;
       attempt.polling = setInterval(() => {
         void pollNotices(attempt);
@@ -542,6 +676,7 @@ export function initializeSession(
     if (typeof data.model !== "string" || !data.model.trim())
       throw new Error("Invalid model configuration");
     onModel(data.model);
+    onInitialPrompt(typeof data.initialPrompt === "string" ? data.initialPrompt : "");
     csrf = data.csrf;
     logout.hidden = false;
     sessionsEnabled = data.sessionsEnabled === true;
@@ -573,10 +708,54 @@ export function initializeSession(
   };
   const toggleMute = () => {
     const client = active?.client;
-    if (!client) return;
+    if (!client || active?.paused) return;
     const enabled = !client.isMicEnabled;
     client.enableMic(enabled);
     mute.textContent = enabled ? "Mute microphone" : "Unmute microphone";
+  };
+  const togglePause = () => {
+    const attempt = active;
+    const client = attempt?.client;
+    if (!attempt || !client || attempt.connecting || attempt.controlPending) return;
+    const paused = !attempt.paused;
+    pause.disabled = true;
+    if (paused) {
+      attempt.paused = true;
+      attempt.micWasEnabled = client.isMicEnabled;
+      client.enableMic(false);
+      mute.disabled = true;
+      onPaused(true);
+      audio.pause();
+      enableAudio.hidden = true;
+      void attempt.websocketAudio?.interruptBotAudio().catch(() => {
+        if (owns(attempt)) void stopCurrent();
+      });
+      status.textContent = "Pausing conversation…";
+    } else {
+      status.textContent = "Resuming conversation…";
+    }
+    const sequence = ++attempt.controlSequence;
+    const timer = setTimeout(() => {
+      if (owns(attempt) && attempt.controlPending?.sequence === sequence) {
+        showError(
+          attempt,
+          "Pause or resume was not confirmed. End the call and retry.",
+        );
+        void stopCurrent();
+      }
+    }, 5000);
+    attempt.controlPending = { sequence, paused, timer };
+    try {
+      client.sendClientMessage("conversation-control", {
+        action: paused ? "pause" : "resume",
+        sequence,
+      });
+    } catch {
+      clearTimeout(timer);
+      attempt.controlPending = undefined;
+      showError(attempt, "Could not change conversation state. End the call and retry.");
+      void stopCurrent();
+    }
   };
   const signOut = async () => {
     logout.disabled = true;
@@ -594,6 +773,7 @@ export function initializeSession(
   end.addEventListener("click", endConversation);
   enableAudio.addEventListener("click", enablePlayback);
   mute.addEventListener("click", toggleMute);
+  pause.addEventListener("click", togglePause);
   logout.addEventListener("click", signOut);
   void initialize().catch(() => {
     status.textContent = "Unable to load this bot. Reload to retry.";
@@ -603,6 +783,7 @@ export function initializeSession(
     end.removeEventListener("click", endConversation);
     enableAudio.removeEventListener("click", enablePlayback);
     mute.removeEventListener("click", toggleMute);
+    pause.removeEventListener("click", togglePause);
     logout.removeEventListener("click", signOut);
     void stopCurrent();
   };
