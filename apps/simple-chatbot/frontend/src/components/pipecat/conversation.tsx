@@ -14,6 +14,7 @@ import {
   type TextRenderMode,
 } from "@/components/pipecat/conversation-message";
 import { cn } from "@/lib/utils";
+import { speakerText } from "@/lib/speakers";
 
 export interface ConversationViewProps extends Omit<
   ConversationMessageItemProps,
@@ -165,7 +166,15 @@ export function Conversation({
           ? allMessages.filter((m) => m.role !== "function_call")
           : allMessages),
         ...localMessages,
-      ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      ]
+        .map((message) => message.role === "user" ? {
+          ...message,
+          parts: message.parts.map((part) => ({
+            ...part,
+            text: typeof part.text === "string" ? speakerText(part.text) : part.text,
+          })),
+        } : message)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [allMessages, localMessages, noFunctionCalls],
   );
 

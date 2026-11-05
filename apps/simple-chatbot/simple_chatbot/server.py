@@ -26,6 +26,7 @@ from simple_chatbot.config import (
     load_settings,
     server_ice,
 )
+from simple_chatbot.diarization import DiarizationSession
 from simple_chatbot.webrtc import BrowserWebRTCConnection as SmallWebRTCConnection
 
 
@@ -61,6 +62,8 @@ class Peer:
     expires: float
     task: asyncio.Task | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    closing: bool = False
+    closed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -68,20 +71,45 @@ def create_app(settings: Settings) -> FastAPI:
     notices: dict[str, list[dict]] = {}
     tickets: dict[str, tuple[str, float, ConversationOptions]] = {}
     create_lock = asyncio.Lock()
+    speaker_sessions: dict[str, DiarizationSession] = {}
+
+    def speakers(owner: str) -> DiarizationSession | None:
+        if not settings.diarization:
+            return None
+        if owner not in speaker_sessions:
+            speaker_sessions[owner] = DiarizationSession(settings.diarization)
+        return speaker_sessions[owner]
+
+    async def forget_owner(owner: str) -> None:
+        state = speaker_sessions.pop(owner, None)
+        if state:
+            await state.delete()
 
     async def close_peer(pc_id: str) -> None:
-        peer = peers.pop(pc_id, None)
+        peer = peers.get(pc_id)
         if not peer:
             return
-        if peer.task and peer.task is not asyncio.current_task():
-            peer.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, TimeoutError):
-                await asyncio.wait_for(peer.task, timeout=10)
-        if isinstance(peer.connection, WebSocket):
-            with contextlib.suppress(RuntimeError, WebSocketDisconnect):
-                await peer.connection.close(code=1000)
-        else:
-            await peer.connection.disconnect()
+        if peer.closing:
+            # A canceled bot's finally calls back here while its closer awaits it.
+            if peer.task is not asyncio.current_task():
+                await peer.closed.wait()
+            return
+        peer.closing = True
+        try:
+            if peer.task and peer.task is not asyncio.current_task():
+                peer.task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    await asyncio.wait_for(peer.task, timeout=10)
+            if isinstance(peer.connection, WebSocket):
+                with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                    await peer.connection.close(code=1000)
+            else:
+                await peer.connection.disconnect()
+        finally:
+            # Keep admission reserved until both the pipeline and its speaker
+            # attachment have retired; a replacement cannot reuse a closing actor.
+            peers.pop(pc_id, None)
+            peer.closed.set()
 
     async def reap() -> None:
         while True:
@@ -100,6 +128,11 @@ def create_app(settings: Settings) -> FastAPI:
             for owner in list(notices):
                 if owner not in auth.sessions:
                     notices.pop(owner, None)
+            for owner, state in list(speaker_sessions.items()):
+                if owner not in auth.sessions or (
+                    state.profiles.expired and not any(p.owner == owner for p in peers.values())
+                ):
+                    await forget_owner(owner)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -118,6 +151,7 @@ def create_app(settings: Settings) -> FastAPI:
             with contextlib.suppress(asyncio.CancelledError):
                 await reaper
             await asyncio.gather(*(close_peer(key) for key in list(peers)))
+            await asyncio.gather(*(forget_owner(owner) for owner in list(speaker_sessions)))
             await http.aclose()
 
     http = httpx.AsyncClient(
@@ -200,6 +234,7 @@ def create_app(settings: Settings) -> FastAPI:
             "signedIn": session.signed_in if session else False,
             "loginAvailable": settings.oidc is not None,
             "sessionsEnabled": settings.sessions_enabled,
+            "speakerProfilesEnabled": settings.diarization is not None,
             "unavailableReason": ""
             if settings.sessions_enabled
             else "Voice sessions are not configured. Sign-in and the interface remain available.",
@@ -246,6 +281,7 @@ def create_app(settings: Settings) -> FastAPI:
             *(close_peer(key) for key, peer in list(peers.items()) if peer.owner == session.id)
         )
         notices.pop(session.id, None)
+        await forget_owner(session.id)
         response = JSONResponse({"status": "signed-out"})
         response.delete_cookie(auth.cookie, path=base)
         return response
@@ -293,6 +329,7 @@ def create_app(settings: Settings) -> FastAPI:
                     raise ValueError("Missing answer")
                 peers[connection.pc_id] = peer
                 notices.pop(session.id, None)
+                speaker_state = speakers(session.id)
 
                 def notice(text: str) -> None:
                     events = notices.setdefault(session.id, [])
@@ -309,6 +346,7 @@ def create_app(settings: Settings) -> FastAPI:
                                 gateway_credential(session),
                                 notice,
                                 body.request_data or ConversationOptions(),
+                                **({"diarization": speaker_state} if settings.diarization else {}),
                             )
                     except TimeoutError:
                         pass
@@ -317,6 +355,8 @@ def create_app(settings: Settings) -> FastAPI:
                     except Exception:
                         logger.error("Bot session failed; payload omitted")
                     finally:
+                        if speaker_state:
+                            await speaker_state.detach()
                         await close_peer(connection.pc_id)
 
                 peer.task = asyncio.create_task(run())
@@ -402,6 +442,7 @@ def create_app(settings: Settings) -> FastAPI:
             await websocket.accept()
             peers[key] = Peer(session.id, websocket, session.expires, task=asyncio.current_task())
             notices.pop(session.id, None)
+            speaker_state = speakers(session.id)
 
         def notice(text: str) -> None:
             events = notices.setdefault(session.id, [])
@@ -411,13 +452,21 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             async with asyncio.timeout(max(0, session.expires - time.time())):
                 await app.state.run_bot(
-                    websocket, settings, http, gateway_credential(session), notice, ticket[2]
+                    websocket,
+                    settings,
+                    http,
+                    gateway_credential(session),
+                    notice,
+                    ticket[2],
+                    **({"diarization": speaker_state} if settings.diarization else {}),
                 )
         except (TimeoutError, RuntimeError, WebSocketDisconnect):
             pass
         except Exception:
             logger.error("WebSocket session failed; payload omitted")
         finally:
+            if speaker_state:
+                await speaker_state.detach()
             await close_peer(key)
 
     static = Path(__file__).resolve().parent.parent / "frontend" / "dist"

@@ -125,6 +125,8 @@ def test_bot_ids_cannot_escape_exact_paths(identity: str) -> None:
         {"gatewayPermissions": ["llm:invoke", "model:example-model:invoke", "model:*:invoke"]},
         {"gatewaySecretRef": {"name": "pipecat-bot-other", "key": "gatewayApiKey"}},
         {"stt": {"secretRef": {"name": "pipecat-bot-voice-bot", "key": "gatewayApiKey"}}},
+        {"diarization": {"secretRef": {"name": "pipecat-bot-other", "key": "diarizationApiKey"}}},
+        {"diarization": {"secretRef": {"name": "pipecat-bot-voice-bot", "key": "gatewayApiKey"}}},
     ],
 )
 def test_invalid_or_broader_bot_selections_fail_closed(change: dict[str, Any]) -> None:
@@ -160,6 +162,10 @@ def test_selection_matches_chart_refs_and_does_not_import_external_secrets() -> 
     product = deepcopy(PRODUCT)
     product["bots"][0]["gatewaySecretRef"] = {"name": "existing-scoped-key", "key": "key"}
     product["bots"][0]["stt"]["secretRef"] = {"name": "existing-speech", "key": "token"}
+    product["bots"][0]["diarization"] = {
+        "url": "wss://speech.example.com/v1/diarization/stream",
+        "secretRef": {"name": "existing-diarization", "key": "token"},
+    }
     external = select_pipecat(product)
     assert not external.bots[0].gateway and not external.bots[0].speech
     assert not select_pipecat({"enabled": True, "bots": []}).bots

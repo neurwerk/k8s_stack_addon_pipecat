@@ -22,6 +22,7 @@
             "anonymous": {"type": "boolean"}, "sessionsEnabled": {"type": "boolean"},
             "enabled": {"type": "boolean", "default": true},
             "modelId": {"type": "string", "minLength": 1},
+            "diarization": {"$ref": "#/definitions/diarization"},
             "gatewayPermissions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][A-Za-z0-9:._/-]{0,255}$"}}
           }}},
         "turn": {
@@ -65,6 +66,20 @@
             }
           }
         }
+      }
+    }
+  },
+  "definitions": {
+    "diarization": {
+      "type": "object", "additionalProperties": false, "required": ["url", "secretRef"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^wss?://[^\\s/?#@]+/v1/diarization/stream$"},
+        "secretRef": {
+          "type": "object", "additionalProperties": false, "required": ["name", "key"],
+          "properties": {"name": {"type": "string", "minLength": 1}, "key": {"type": "string", "minLength": 1}}
+        },
+        "profileTtlSeconds": {"type": "integer", "minimum": 60, "maximum": 86400, "default": 86400},
+        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 15}
       }
     }
   }

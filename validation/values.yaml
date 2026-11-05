@@ -29,6 +29,9 @@ pipecat:
       modelId: example-model
       stt: {baseUrl: https://speech.example.com/v1, model: whisper-1}
       tts: {baseUrl: https://speech.example.com/v1, model: tts-1, voice: alloy}
+      diarization:
+        url: wss://speech.example.com/v1/diarization/stream
+        secretRef: {name: pipecat-bot-example, key: diarizationApiKey}
     - id: public-example
       script:
         enabled: true

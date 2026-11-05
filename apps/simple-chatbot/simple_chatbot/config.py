@@ -46,6 +46,29 @@ class OIDC(BaseModel):
     admission_role: str = "pipecat-user"
 
 
+class Diarization(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str
+    key: SecretRef
+    profile_ttl_seconds: int = Field(default=86400, ge=60, le=86400)
+    timeout_seconds: float = Field(default=15, ge=1, le=60)
+
+    @model_validator(mode="after")
+    def validate_url(self) -> "Diarization":
+        url = urlsplit(self.url)
+        if (
+            url.scheme not in ("ws", "wss")
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or url.path != "/v1/diarization/stream"
+        ):
+            raise ValueError("Expected a diarization streaming WebSocket URL")
+        return self
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     bot_id: str = Field(pattern=r"^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$")
@@ -63,6 +86,7 @@ class Settings(BaseModel):
     model_id: str = Field(default="", max_length=200)
     stt: Speech | None = None
     tts: Speech | None = None
+    diarization: Diarization | None = None
     ice_servers: list[dict] = Field(default_factory=list, max_length=8)
     browser_ice_servers: list[dict] = Field(default_factory=list, max_length=8)
     browser_ice_secret: SecretRef | None = None
