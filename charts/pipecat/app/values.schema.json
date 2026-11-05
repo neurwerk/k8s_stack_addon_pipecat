@@ -53,6 +53,15 @@
         "secretRef": {"$ref": "#/definitions/secret"}
       }
     },
+    "diarization": {
+      "type": "object", "additionalProperties": false, "required": ["url", "secretRef"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^wss?://[^\\s/?#@]+/v1/diarization/stream$"},
+        "secretRef": {"$ref": "#/definitions/secret"},
+        "profileTtlSeconds": {"type": "integer", "minimum": 60, "maximum": 86400, "default": 86400},
+        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 15}
+      }
+    },
     "ice": {
       "type": "array", "maxItems": 8,
       "items": {
@@ -77,6 +86,7 @@
         "modelId": {"type": "string", "minLength": 1, "maxLength": 200},
         "stt": {"$ref": "#/definitions/speech"},
         "tts": {"$ref": "#/definitions/speech"},
+        "diarization": {"$ref": "#/definitions/diarization"},
         "gatewaySecretRef": {"$ref": "#/definitions/secret"},
         "iceSecretRef": {"$ref": "#/definitions/secret"},
         "browserIceSecretRef": {"$ref": "#/definitions/secret"},

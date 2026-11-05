@@ -54,6 +54,11 @@
 {{- $_ := set $config $kind $service }}
 {{- end }}
 {{- end }}
+{{- with $bot.diarization }}
+{{- if and (hasPrefix "pipecat-bot-" .secretRef.name) (or (ne .secretRef.name (printf "pipecat-bot-%s" $bot.id)) (ne .secretRef.key "diarizationApiKey")) }}{{ fail "Managed diarization Secret references must match their bot and diarizationApiKey field" }}{{ end }}
+{{- $_ := set $credentials "diarization" .secretRef }}
+{{- $_ := set $config "diarization" (dict "url" .url "key" (dict "file" "/credentials/diarization/value") "profile_ttl_seconds" (.profileTtlSeconds | default 86400) "timeout_seconds" (.timeoutSeconds | default 15)) }}
+{{- end }}
 {{- if $bot.iceSecretRef }}
 {{- $_ := set $credentials "ice" $bot.iceSecretRef }}
 {{- $_ := set $config "server_ice_secret" (dict "file" "/credentials/ice/value") }}

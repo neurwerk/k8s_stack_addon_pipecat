@@ -6,7 +6,8 @@ import io
 import json
 import time
 import wave
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections import deque
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 
 import httpx
 from loguru import logger
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import SegmentedSTTService
@@ -30,7 +32,10 @@ from pipecat.utils.text.transforms import strip_markdown
 from pipecat.utils.time import time_now_iso8601
 
 from simple_chatbot.config import ConversationOptions, Settings, Speech
+from simple_chatbot.diarization import DiarizationError, DiarizationSession, SpeakerSpan
 from simple_chatbot.notices import NoticeSplitter, SpeechControlFilter
+from simple_chatbot.speaker_transcripts import attribute_transcript
+from simple_chatbot.speakers import SPEAKER_TOOLS, SpeakerProfiles
 from simple_chatbot.timings import TurnTiming, TurnTimings
 
 
@@ -38,7 +43,57 @@ def speech_headers(speech: Speech) -> dict[str, str]:
     return {"Authorization": "Bearer " + speech.key.read()} if speech.key else {}
 
 
-async def bounded_sse(response: httpx.Response) -> AsyncIterator[dict]:
+class _SpeakerToolCall:
+    """One bounded streamed function call; no arguments are interpreted while streaming."""
+
+    def __init__(self):
+        self.id = ""
+        self.name = ""
+        self.arguments = ""
+        self.seen = False
+
+    def feed(self, calls: list) -> None:
+        if len(calls) > 1:
+            raise ValueError("Too many tool calls")
+        for call in calls:
+            if (
+                not isinstance(call, dict)
+                or type(call.get("index")) is not int
+                or call["index"] != 0
+                or call.get("type") not in (None, "function")
+                or set(call) - {"index", "id", "type", "function"}
+            ):
+                raise ValueError("Invalid tool call")
+            function = call.get("function", {})
+            if not isinstance(function, dict) or set(function) - {"name", "arguments"}:
+                raise ValueError("Invalid tool function")
+            for key, value, limit in (
+                ("id", call.get("id"), 256),
+                ("name", function.get("name"), 80),
+                ("arguments", function.get("arguments"), 4096),
+            ):
+                if value is not None:
+                    if not isinstance(value, str):
+                        raise ValueError("Invalid tool fragment")
+                    value = getattr(self, key) + value
+                    if len(value) > limit:
+                        raise ValueError("Tool limit exceeded")
+                    setattr(self, key, value)
+            self.seen = True
+
+    def message(self) -> dict:
+        if not self.id or not self.name or not self.arguments:
+            raise ValueError("Incomplete tool call")
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.name, "arguments": self.arguments},
+        }
+
+
+async def bounded_sse(
+    response: httpx.Response, *, allow_tools: bool = False
+) -> AsyncIterator[dict]:
     """Incremental SSE with a strict single-choice, completed chat response boundary."""
     if (
         response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
@@ -51,6 +106,8 @@ async def bounded_sse(response: httpx.Response) -> AsyncIterator[dict]:
     event_size = 0
     total = 0
     saw_choice = saw_content = finished = False
+    tool = _SpeakerToolCall()
+    terminal_reason = "stop"
     async for chunk in response.aiter_bytes():
         total += len(chunk)
         if total > 2_000_000:
@@ -65,7 +122,7 @@ async def bounded_sse(response: httpx.Response) -> AsyncIterator[dict]:
                 data = "\n".join(data_lines)
                 data_lines, event_size = [], 0
                 if data == "[DONE]":
-                    if not (saw_choice and saw_content and finished):
+                    if not (saw_choice and (saw_content or tool.seen) and finished):
                         raise ValueError("Incomplete gateway completion")
                     return
                 event = json.loads(data)
@@ -94,7 +151,7 @@ async def bounded_sse(response: httpx.Response) -> AsyncIterator[dict]:
                     # final usage chunk. It is accounting, not another response.
                     if (
                         not isinstance(event.get("usage"), dict)
-                        or choice.get("finish_reason") != "stop"
+                        or choice.get("finish_reason") != terminal_reason
                         or delta.get("role") not in (None, "assistant")
                         or any(
                             key != "role" and value not in (None, "")
@@ -115,10 +172,15 @@ async def bounded_sse(response: httpx.Response) -> AsyncIterator[dict]:
                     raise ValueError("Invalid tool delta")
                 saw_choice = True
                 saw_content |= bool((delta.get("content") or "").strip())
+                if allow_tools and delta.get("tool_calls"):
+                    tool.feed(delta["tool_calls"])
                 reason = choice.get("finish_reason")
                 if reason is not None:
-                    if reason != "stop":
+                    if allow_tools and reason == "tool_calls":
+                        tool.message()
+                    elif reason != "stop" or (allow_tools and tool.seen):
                         raise ValueError("Unsuccessful gateway completion")
+                    terminal_reason = reason
                     finished = True
                 yield event
             elif line.startswith("data:") or line == "data":
@@ -211,6 +273,8 @@ class GatewayLLM(FrameProcessor):
         notice: Callable[[str], None],
         timings: TurnTimings | None = None,
         options: ConversationOptions | None = None,
+        profiles: SpeakerProfiles | None = None,
+        forget_speakers: Callable[[], Awaitable[None]] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -219,12 +283,156 @@ class GatewayLLM(FrameProcessor):
         self.notice = notice
         self.timings = timings
         self.options = options or ConversationOptions()
+        self.profiles = profiles
+        self.forget_speakers = forget_speakers
+
+    async def _speaker_tool(self, tool: _SpeakerToolCall, turn: int, generation: int) -> dict:
+        profiles = self.profiles
+        if profiles is None or (profiles.turn, profiles.generation) != (turn, generation):
+            return {"ok": False, "reason": "The speaker turn changed. Please ask again."}
+        try:
+            arguments = json.loads(tool.arguments)
+        except ValueError:
+            return {"ok": False, "reason": "Invalid tool arguments."}
+        if not isinstance(arguments, dict):
+            return {"ok": False, "reason": "Invalid tool arguments."}
+        if tool.name == "remember_speaker" and set(arguments) == {"name"}:
+            return profiles.register(arguments["name"], turn, generation)
+        if tool.name == "forget_speakers" and not arguments:
+            if self.forget_speakers is None:
+                return {"ok": False, "reason": "Forgetting speaker profiles is unavailable."}
+            try:
+                await self.forget_speakers()
+            except Exception:
+                # Never expose upstream details or claim a failed deletion succeeded.
+                return {"ok": False, "reason": "Could not forget speaker profiles. Please retry."}
+            return {"ok": True}
+        return {"ok": False, "reason": "Unknown tool or unexpected arguments."}
+
+    async def _speaker_response(
+        self, messages: list, timing: TurnTiming | None, turn: int, generation: int
+    ) -> None:
+        assert self.profiles is not None
+        # Tool schemas, instructions and exchanges are request-local. The speech
+        # aggregators alone update the shared conversational context.
+        history = list(messages)
+        mutated = emitted = False
+        for attempt in range(2):
+            try:
+                for round_number in range(2):
+                    tool = _SpeakerToolCall()
+                    splitter = NoticeSplitter()
+                    speech = SpeechControlFilter()
+                    content: list[str] = []
+                    content_size = 0
+                    spoken = False
+                    try:
+                        if timing:
+                            timing.llm_started = time.monotonic()
+                        async with self.http.stream(
+                            "POST",
+                            self.settings.gateway_url,
+                            follow_redirects=False,
+                            headers={"Authorization": "Bearer " + self.credential},
+                            json={
+                                "model": self.settings.model_id,
+                                "messages": [
+                                    {"role": "system", "content": self.profiles.instructions()},
+                                    *history,
+                                ],
+                                "stream": True,
+                                "max_tokens": 512,
+                                **(
+                                    {"tools": SPEAKER_TOOLS, "parallel_tool_calls": False}
+                                    if round_number == 0
+                                    else {}
+                                ),
+                                **(
+                                    {"reasoning": {"effort": self.options.reasoning_effort}}
+                                    if self.options.reasoning_effort is not None
+                                    else {}
+                                ),
+                            },
+                        ) as response:
+                            response.raise_for_status()
+                            async for event in bounded_sse(response, allow_tools=True):
+                                for choice in event.get("choices", []):
+                                    delta = choice["delta"]
+                                    if delta.get("tool_calls"):
+                                        if round_number:
+                                            raise ValueError("Tool round limit exceeded")
+                                        tool.feed(delta["tool_calls"])
+                                    text = delta.get("content")
+                                    if isinstance(text, str):
+                                        content_size += len(text)
+                                        if content_size > 65536:
+                                            raise ValueError("Content limit exceeded")
+                                        clean = speech.feed(splitter.feed(text))
+                                        if clean:
+                                            content.append(clean)
+                                            if timing and clean.strip():
+                                                await timing.first_text()
+                                            spoken |= bool(clean.strip())
+                                            emitted = True
+                                            await self.push_frame(LLMTextFrame(clean))
+                    finally:
+                        splitter.finish()
+                        if splitter.notice:
+                            self.notice(splitter.notice)
+                    if not tool.seen:
+                        if not spoken:
+                            raise ValueError("No assistant speech content")
+                        return
+                    call = tool.message()
+                    # Mark before awaiting: cancellation or follow-up failure must
+                    # never replay a possibly completed remote deletion.
+                    mutated = True
+                    result = await self._speaker_tool(tool, turn, generation)
+                    history.extend(
+                        [
+                            {
+                                "role": "assistant",
+                                "content": "".join(content) or None,
+                                "tool_calls": [call],
+                            },
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool.id,
+                                "content": json.dumps(result, ensure_ascii=False),
+                            },
+                        ]
+                    )
+            except httpx.HTTPStatusError as error:
+                if timing:
+                    await timing.finish("failed")
+                await self.push_error(
+                    f"Model request rejected (HTTP {error.response.status_code}).",
+                    force_treat_as_permanent=True,
+                )
+                return
+            except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+                if attempt == 0 and not emitted and not mutated:
+                    continue
+                if timing:
+                    await timing.finish("failed")
+                await self.push_error(
+                    "Model connection failed or timed out. Please retry."
+                    if isinstance(error, httpx.HTTPError)
+                    else "Model response was invalid or incomplete. Please retry.",
+                    category=(
+                        ErrorCategory.CONNECTIVITY
+                        if isinstance(error, httpx.HTTPError)
+                        else ErrorCategory.APPLICATION
+                    ),
+                )
+                return
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if not isinstance(frame, LLMContextFrame):
             await self.push_frame(frame, direction)
             return
+        speaker_turn = self.profiles.begin_response() if self.profiles else None
         timing = await self.timings.begin_llm() if self.timings else None
         start = LLMFullResponseStartFrame()
         if timing:
@@ -239,6 +447,9 @@ class GatewayLLM(FrameProcessor):
                     "Conversation limit reached. Start a new conversation.",
                     force_treat_as_permanent=True,
                 )
+                return
+            if speaker_turn is not None:
+                await self._speaker_response(messages, timing, *speaker_turn)
                 return
             for attempt in range(2):
                 splitter = NoticeSplitter()
@@ -333,12 +544,18 @@ class GatewayLLM(FrameProcessor):
 
 class HTTPSTT(SegmentedSTTService):
     def __init__(
-        self, settings: Speech, http: httpx.AsyncClient, timings: TurnTimings | None = None
+        self,
+        settings: Speech,
+        http: httpx.AsyncClient,
+        timings: TurnTimings | None = None,
+        diarization: DiarizationSession | None = None,
     ):
         super().__init__(sample_rate=16000)
         self.speech = settings
         self.http = http
         self.timings = timings
+        self.diarization = diarization
+        self._speaker_segments: deque[asyncio.Future[SpeakerSpan]] = deque()
 
     async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         # Pinned Pipecat's segmented adapter has an unbounded queue and utterance buffer.
@@ -347,9 +564,33 @@ class HTTPSTT(SegmentedSTTService):
             self._audio_buffer.clear()
             await self.push_error("Speech input limit reached", force_treat_as_permanent=True)
             return
+        if self.diarization:
+            try:
+                if frame.sample_rate != 16000 or frame.num_channels != 1:
+                    raise DiarizationError("Unsupported speaker audio format")
+                self.diarization.feed(frame.audio)
+            except DiarizationError:
+                await self.push_error(
+                    "Speaker recognition unavailable. Please start a new conversation.",
+                    force_treat_as_permanent=True,
+                )
+                return
         await super().process_audio_frame(frame, direction)
 
+    async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        if self.diarization and self.is_usable:
+            try:
+                start = self.diarization.position - len(self._audio_buffer) // 2
+                self._speaker_segments.append(self.diarization.flush(start))
+            except DiarizationError:
+                await self.push_error(
+                    "Speaker recognition unavailable. Please start a new conversation.",
+                    force_treat_as_permanent=True,
+                )
+        await super()._handle_user_stopped_speaking(frame)
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        segment = self._speaker_segments.popleft() if self.diarization else None
         timing = await self.timings.begin_stt() if self.timings else None
         audio_seconds = None
         if timing:
@@ -368,7 +609,8 @@ class HTTPSTT(SegmentedSTTService):
                 data={
                     "model": self.speech.model,
                     "language": self.speech.language,
-                    "response_format": "json",
+                    "response_format": "verbose_json" if self.diarization else "json",
+                    **({"timestamp_granularities[]": "word"} if self.diarization else {}),
                 },
             ) as response:
                 response.raise_for_status()
@@ -377,15 +619,22 @@ class HTTPSTT(SegmentedSTTService):
                     data.extend(chunk)
                     if len(data) > 65536:
                         raise ValueError("Transcript limit reached")
-                text = json.loads(data)["text"]
+                payload = json.loads(data)
+                text = payload["text"]
                 if not isinstance(text, str) or len(text) > 8192:
                     raise ValueError("Invalid transcript")
                 if timing:
                     await timing.transcribed(
                         time.monotonic() - started, len(text.split()), audio_seconds
                     )
-                yield TranscriptionFrame(text, "", time_now_iso8601())
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                speaker = ""
+                if self.diarization and segment:
+                    span = await asyncio.wait_for(
+                        asyncio.shield(segment), self.diarization.settings.timeout_seconds * 2
+                    )
+                    text, speaker = attribute_transcript(payload, span, self.diarization.profiles)
+                yield TranscriptionFrame(text, speaker, time_now_iso8601())
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError):
             if timing:
                 await timing.finish("failed")
             await self.push_error("Speech recognition failed", force_treat_as_permanent=True)

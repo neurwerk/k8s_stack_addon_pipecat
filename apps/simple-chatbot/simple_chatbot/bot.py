@@ -32,6 +32,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 from simple_chatbot.config import ConversationOptions, Settings
+from simple_chatbot.diarization import DiarizationSession
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
 from simple_chatbot.timings import TurnTimings
 from simple_chatbot.websocket import BrowserSerializer
@@ -44,8 +45,11 @@ async def run_bot(
     credential: str,
     notice: Callable[[str], None],
     options: ConversationOptions | None = None,
+    diarization: DiarizationSession | None = None,
 ) -> None:
     assert settings.stt and settings.tts
+    if diarization:
+        await diarization.attach()
     transport: BaseTransport
     if isinstance(connection, WebSocket):
         transport = FastAPIWebsocketTransport(
@@ -72,6 +76,14 @@ async def run_bot(
                     "Your output is spoken aloud; avoid special formatting. "
                     "Keep your answers brief. "
                     "Start by introducing yourself."
+                    + (
+                        " If speaker names are saved, greet the group without assigning a "
+                        "voice until someone speaks. Otherwise ask one person to introduce "
+                        "themselves with their name and a short sentence, then ask if anybody "
+                        "else is joining. Introductions are spoken, without buttons."
+                        if diarization
+                        else ""
+                    )
                 ),
             }
         ]
@@ -93,9 +105,18 @@ async def run_bot(
     pipeline = Pipeline(
         [
             transport.input(),
-            HTTPSTT(settings.stt, http, timings),
+            HTTPSTT(settings.stt, http, timings, diarization=diarization),
             user,
-            GatewayLLM(settings, http, credential, notice, timings, options),
+            GatewayLLM(
+                settings,
+                http,
+                credential,
+                notice,
+                timings,
+                options,
+                profiles=diarization.profiles if diarization else None,
+                forget_speakers=diarization.reset if diarization else None,
+            ),
             HTTPTTS(settings.tts, http),
             transport.output(),
             assistant,

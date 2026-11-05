@@ -36,7 +36,10 @@ class PipecatBot:
         if (
             not _ID.fullmatch(self.id)
             or self.id in _RESERVED_IDS
-            or any(field not in ("sttApiKey", "ttsApiKey") for field in self.speech)
+            or any(
+                field not in ("sttApiKey", "ttsApiKey", "diarizationApiKey")
+                for field in self.speech
+            )
         ):
             raise SelectionError("Invalid Pipecat bot credential selection")
 
@@ -92,6 +95,7 @@ def validate_selection(addon: Addon, selection: Selection, product: object) -> N
             "gateway": bot.gateway,
             "stt": "sttApiKey" in bot.speech,
             "tts": "ttsApiKey" in bot.speech,
+            "diarization": "diarizationApiKey" in bot.speech,
         }:
             raise SelectionError("Pipecat bot features differ from product settings")
     expand_setup(addon, selected)
@@ -201,7 +205,7 @@ def _select_bot(
                 "Enabled anonymous Pipecat sessions require explicit gateway grants"
             )
     fields = []
-    for direction in ("stt", "tts"):
+    for direction in ("stt", "tts", "diarization"):
         speech = _settings(row, direction)
         field = f"{direction}ApiKey"
         if _managed_ref(speech.get("secretRef"), name, field, False) and managed:

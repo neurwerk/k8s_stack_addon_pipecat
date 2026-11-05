@@ -77,16 +77,17 @@ def test_machine_request_does_not_supply_its_own_approval():
         validate_selection(addon, selection(), values)
 
 
-@pytest.mark.parametrize("gateway,stt,tts", list(product((False, True), repeat=3)))
-def test_independent_bot_fields_match_actual_eso_without_voice(gateway, stt, tts):
+@pytest.mark.parametrize("gateway,stt,tts,diarization", list(product((False, True), repeat=4)))
+def test_independent_bot_fields_match_actual_eso_without_voice(gateway, stt, tts, diarization):
     addon = load_manifest(ROOT / "release/manifest.yaml")
     selected = selection()
     selected.addons[0].features = {"oidc": True, "managed-oidc": True}
     selected.addons[0].instances[0].features = {
-        "runtime": gateway or stt or tts,
+        "runtime": gateway or stt or tts or diarization,
         "gateway": gateway,
         "stt": stt,
         "tts": tts,
+        "diarization": diarization,
     }
     values = deepcopy(PRODUCT)
     values["turn"]["enabled"] = False
@@ -99,6 +100,11 @@ def test_independent_bot_fields_match_actual_eso_without_voice(gateway, stt, tts
             if enabled
             else {}
         )
+    if diarization:
+        bot["diarization"] = {
+            "url": "wss://speech.example.com/v1/diarization/stream",
+            "secretRef": {"name": "pipecat-bot-voice-bot", "key": "diarizationApiKey"},
+        }
     validate_selection(addon, selected, values)
     setup = expand_setup(addon, selected.addons[0])
     expected = {(record.path, key) for record in setup.records for key in record.fields}
@@ -120,9 +126,11 @@ def test_independent_bot_fields_match_actual_eso_without_voice(gateway, stt, tts
     assert deliveries == {(d.namespace, d.name) for d in setup.deliveries}
     assert not setup.handover
     # A client cannot turn an external/authless provider into a supplied credential.
-    selected.addons[0].instances[0].features["stt"] = not stt
-    with pytest.raises(SelectionError):
-        validate_selection(addon, selected, values)
+    for feature, enabled in (("stt", stt), ("diarization", diarization)):
+        selected.addons[0].instances[0].features[feature] = not enabled
+        with pytest.raises(SelectionError):
+            validate_selection(addon, selected, values)
+        selected.addons[0].instances[0].features[feature] = enabled
 
 
 def test_maximum_catalog_expands_without_suffixing_shared_stores():
@@ -152,7 +160,8 @@ def test_maximum_catalog_expands_without_suffixing_shared_stores():
         Selection.model_validate(data)
 
 
-def test_real_setup_preserves_raw_keys_and_validates_isolated_verifiers():
+@pytest.mark.parametrize("diarization", [False, True])
+def test_real_setup_preserves_raw_keys_and_validates_isolated_verifiers(diarization):
     try:
         installed = version("openbao-stack-setup")
     except PackageNotFoundError:
@@ -167,17 +176,41 @@ def test_real_setup_preserves_raw_keys_and_validates_isolated_verifiers():
     from openbao_stack_setup import declarative
 
     addon = load_manifest(ROOT / "release/manifest.yaml")
-    setups = {"pipecat": expand_setup(addon, selection().addons[0])}
+    selected = selection()
+    selected.addons[0].instances[0].features["tts"] = True
+    supplied = {"sttApiKey": "synthetic-input", "ttsApiKey": "synthetic-tts-input"}
+    setups = {"pipecat": expand_setup(addon, selected.addons[0])}
     snapshots = {}
     client = Mock(spec=client_module.OpenBaoClient)
     client.read_secret.side_effect = snapshots.get
     plan = declarative.plan_credentials(
         client,
         setups,
-        supplied={"pipecat": {"voice-bot-speech": {"sttApiKey": "synthetic-input"}}},
+        supplied={"pipecat": {"voice-bot-speech": supplied}},
     )
     for write in plan.writes:
         snapshots[write.path] = client_module.SecretRecord(values=write.values, version=1)
+    if diarization:
+        previous = dict(snapshots)
+        selected.addons[0].instances[0].features["diarization"] = True
+        setups = {"pipecat": expand_setup(addon, selected.addons[0])}
+        added = {"diarizationApiKey": "synthetic-diarization-input"}
+        incremental = declarative.plan_credentials(
+            client,
+            setups,
+            supplied={"pipecat": {"voice-bot-diarization": added}},
+        )
+        assert len(incremental.writes) == 1
+        write = incremental.writes[0]
+        assert write.path == "addons/pipecat/bots/voice-bot"
+        assert write.values == previous[write.path].values | added
+        snapshots[write.path] = client_module.SecretRecord(values=write.values, version=2)
+        assert all(
+            snapshots[path] == record for path, record in previous.items() if path != write.path
+        )
+        supplied.update(added)
+    runtime = snapshots["addons/pipecat/bots/voice-bot"].values
+    assert {key: value for key, value in runtime.items() if key != "gatewayApiKey"} == supplied
     assert not declarative.plan_credentials(client, setups).writes
     readers = {reader.role: set(reader.records) for reader in declarative.compose_readers(setups)}
     assert readers["auth-keycloak-api-key-bridge"] == {"addons/pipecat/verifiers/voice-bot"}
