@@ -18,6 +18,16 @@
         }},
         "hostname": {"type": "string", "pattern": "^$|^[a-z0-9-]+(\\.[a-z0-9-]+)+$"},
         "image": {"type": "string"},
+        "channels": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "image": {"type": "string", "pattern": "^$|^[^ ]+:[^ @]+@sha256:[a-f0-9]{64}$"},
+            "intervalSeconds": {"type": "integer", "minimum": 10, "maximum": 300},
+            "resources": {"type": "object", "required": ["requests", "limits"]},
+            "apiServerCIDR": {"type": "string"},
+            "apiServerPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+          }
+        },
         "gatewayOrigin": {"type": "string", "pattern": "^$|^https://[^/?#]+/?$"},
         "ingressClassName": {"type": "string", "minLength": 1},
         "clusterIssuer": {"type": "string", "minLength": 1},
@@ -73,7 +83,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "anonymous"],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
+        "id": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values", "channel-controller", "channel-config"]}},
         "enabled": {"type": "boolean", "default": true},
         "gatewayBaseUrl": {"type": "string", "pattern": "^https://[^/?#]+/[^?#]+$"},
         "gatewayCredentialMode": {"enum": ["none", "global"]},
@@ -103,12 +113,15 @@
             "bucket": {"type": "string", "minLength": 1},
             "key": {"type": "string", "minLength": 1},
             "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "channel": {"type": "string", "pattern": "^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$", "not": {"enum": ["turn", "product-values"]}},
+            "runtimeVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[a-z0-9.+-]*)$"},
             "secretName": {"type": "string", "minLength": 1},
             "accessKeyKey": {"type": "string", "minLength": 1},
             "secretKeyKey": {"type": "string", "minLength": 1}
           },
           "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
-          "then": {"required": ["endpoint", "bucket", "key", "sha256", "secretName"]}
+          "then": {"required": ["endpoint", "bucket", "key", "sha256", "secretName"]},
+          "dependencies": {"channel": ["runtimeVersion"]}
         }
       },
       "allOf": [

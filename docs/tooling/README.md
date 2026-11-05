@@ -15,4 +15,6 @@ pipecat-validate /work/addon --values /work/client/config/client.yaml --values /
 
 `pipecat-validate` validates only; it neither generates a second plan nor reads credentials. `pipecat-apps` provides interactive and noninteractive source validation, immutable S3 publishing, selected client-value edits, enable/disable, status and bounded logs; see [app format and exact commands](../scripts.md). It does not commit, push or patch deployments. Shared setup verifies complete selection and source revisions before custody. Runtime commands `pipecat-bundle` and `pipecat-turn-config` stay in the runtime image. There are no product-specific credential, Job-launch or refresh engines.
 
+The tooling image also runs `pipecat-channel-controller` for opted-in [release channels](../scripts.md#automatic-release-channels), with read-only S3 access and named Deployment get/patch permissions. Publishing and rollback remain in `pipecat-apps`; shared Tooling has no Pipecat-specific release behavior.
+
 See [architecture](../architecture/README.md) and [release operations](../operations/README.md).

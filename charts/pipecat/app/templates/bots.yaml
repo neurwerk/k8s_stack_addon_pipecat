@@ -5,7 +5,7 @@
 {{- $ids := dict }}
 {{- $slugs := dict }}
 {{- range $bot := $p.bots }}
-{{- if has $bot.id (list "turn" "product-values") }}{{ fail "Bot ID is reserved for managed infrastructure" }}{{ end }}
+{{- if has $bot.id (list "turn" "product-values" "channel-controller" "channel-config") }}{{ fail "Bot ID is reserved for managed infrastructure" }}{{ end }}
 {{- $slug := $bot.urlSlug | default $bot.id }}
 {{- if or (hasKey $slugs $slug) (has $slug (list "healthz" "assets")) }}{{ fail "Bot URL slugs must be unique and cannot use reserved paths" }}{{ end }}
 {{- $_ := set $slugs $slug true }}
@@ -128,6 +128,15 @@ spec:
             - {name: S3_BUCKET, value: {{ required "script.bucket is required" $script.bucket | quote }}}
             - {name: S3_KEY, value: {{ required "script.key is required" $script.key | quote }}}
             - {name: BUNDLE_SHA256, value: {{ required "script.sha256 is required" $script.sha256 | quote }}}
+            {{- if $script.channel }}
+            - {name: BUNDLE_APP_ID, value: {{ $bot.id | quote }}}
+            - {name: BUNDLE_CHANNEL, value: {{ $script.channel | quote }}}
+            - {name: BUNDLE_RUNTIME_VERSION, value: {{ $script.runtimeVersion | quote }}}
+            - name: BUNDLE_CHANNEL_RELEASE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['pipecat.neurwerk.com/channel-release']
+            {{- end }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef: {name: {{ $script.secretName }}, key: {{ $script.accessKeyKey | default "AWS_ACCESS_KEY_ID" }}}

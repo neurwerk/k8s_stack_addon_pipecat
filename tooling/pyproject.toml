@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipecat-tooling"
-version = "0.2.3"
+version = "0.2.4"
 description = "Pipecat app bundle publishing, operations and product selection validation."
 readme = "README.md"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
@@ -16,6 +16,7 @@ dependencies = ["k8s-stack-tooling==0.16.0", "boto3>=1.42,<2", "ruamel.yaml>=0.1
 [project.scripts]
 pipecat-validate = "pipecat_tooling.cli:main"
 pipecat-apps = "pipecat_tooling.apps:main"
+pipecat-channel-controller = "pipecat_tooling.channel_controller:main"
 
 [tool.uv.sources]
 k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl"}
