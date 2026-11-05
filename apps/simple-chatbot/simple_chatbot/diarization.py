@@ -5,6 +5,7 @@ import contextlib
 import json
 import re
 import struct
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
+from simple_chatbot.activity import Activity as CallActivity
 from simple_chatbot.config import Diarization
 from simple_chatbot.speakers import SpeakerProfiles
 
@@ -44,6 +46,7 @@ class SpeakerSpan:
     end: int
     generation: int
     activities: tuple[Activity, ...]
+    finalization_seconds: float | None = None
 
     def speaker(self, start: int, end: int, *, enrollment: bool = False) -> str | None:
         # Do not collapse overlap to a dominant speaker. Timestamps can extend
@@ -71,6 +74,8 @@ class Operation:
     end: int = 0
     audio: bytes = b""
     future: asyncio.Future | None = None
+    requested_at: float | None = None
+    activity_token: int | None = None
 
 
 class DiarizationSession:
@@ -96,6 +101,7 @@ class DiarizationSession:
         self.socket: ClientConnection | None = None
         self.worker: asyncio.Task | None = None
         self.failed = False
+        self.activity: CallActivity | None = None
 
     async def attach(self) -> None:
         if self.worker is not None:
@@ -118,6 +124,8 @@ class DiarizationSession:
     def feed(self, audio: bytes) -> None:
         if not audio:
             return
+        if self.activity and not self.activity.operations["diarization"]:
+            self.activity.set("diarization", "active", "Streaming microphone audio")
         if len(audio) % 2 or self.failed or self.worker is None or self.worker.done():
             raise DiarizationError("Speaker audio unavailable")
         if self.queued_bytes + len(audio) > MAX_QUEUED_BYTES:
@@ -135,7 +143,26 @@ class DiarizationSession:
         # A canceled STT request may no longer await this result. Consume exceptions
         # while preserving them for callers that do await it.
         future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
-        self._enqueue(Operation("flush", start, self.position, future=future))
+        token = (
+            self.activity.begin("diarization", "Finalizing speaker results")
+            if self.activity
+            else None
+        )
+        try:
+            self._enqueue(
+                Operation(
+                    "flush",
+                    start,
+                    self.position,
+                    future=future,
+                    requested_at=time.monotonic(),
+                    activity_token=token,
+                )
+            )
+        except DiarizationError:
+            if self.activity and token is not None:
+                self.activity.end("diarization", token, "failed", "Speaker queue unavailable")
+            raise
         return future
 
     def _enqueue(self, operation: Operation) -> None:
@@ -353,6 +380,10 @@ class DiarizationSession:
                     operation.end,
                     self.profiles.generation,
                     tuple(a for a in self.activities if a.end > operation.start),
+                    # Include queued audio and reconnects; stop before the STT consumer resumes.
+                    time.monotonic() - operation.requested_at
+                    if operation.requested_at is not None
+                    else None,
                 )
                 # Keep at most one minute of results for subsequent STT pre-roll.
                 cutoff = operation.end - RATE * 60
@@ -382,6 +413,13 @@ class DiarizationSession:
                     await self._connect()
                     result = await self._perform(operation)
                 self.queued_bytes -= len(operation.audio)
+                if self.activity and operation.activity_token is not None:
+                    self.activity.end(
+                        "diarization",
+                        operation.activity_token,
+                        "active",
+                        "Streaming microphone audio",
+                    )
                 if operation.future and not operation.future.done():
                     operation.future.set_result(result)
                 operation = None
@@ -391,6 +429,13 @@ class DiarizationSession:
             self.failed = True
             self.profiles.clear()
         finally:
+            if self.activity and operation and operation.activity_token is not None:
+                self.activity.end(
+                    "diarization",
+                    operation.activity_token,
+                    "failed" if self.failed else "interrupted",
+                    "Failed" if self.failed else "Interrupted",
+                )
             if operation and operation.future and not operation.future.done():
                 operation.future.set_exception(DiarizationError("Speaker operation interrupted"))
             self._drain()
@@ -400,4 +445,8 @@ class DiarizationSession:
             operation = self.queue.get_nowait()
             if operation.future and not operation.future.done():
                 operation.future.set_exception(DiarizationError("Speaker session closed"))
+            if self.activity and operation.activity_token is not None:
+                self.activity.end(
+                    "diarization", operation.activity_token, "interrupted", "Interrupted"
+                )
         self.queued_bytes = 0

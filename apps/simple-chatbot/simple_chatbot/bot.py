@@ -6,12 +6,12 @@
 """App-owned voice pipeline: independent context and processors per connection."""
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 
 import httpx
 from fastapi import WebSocket
 from loguru import logger
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import (
@@ -40,8 +40,10 @@ from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
+from simple_chatbot.activity import Activity, ActivityObserver, ObservedSmartTurn
 from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.diarization import DiarizationSession
+from simple_chatbot.runtime_info import configured_models, onnx_session_metadata, refresh_models
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
 from simple_chatbot.timings import TurnTimings
 from simple_chatbot.websocket import BrowserSerializer
@@ -57,8 +59,14 @@ async def run_bot(
     diarization: DiarizationSession | None = None,
 ) -> None:
     assert settings.stt and settings.tts
+    activity = Activity()
+    activity.models = configured_models(settings)
     if diarization:
         await diarization.attach()
+        diarization.activity = activity
+    else:
+        activity.set("diarization", "off", "Not configured")
+        activity.set("attribution", "off", "Not configured")
     transport: BaseTransport
     if isinstance(connection, WebSocket):
         transport = FastAPIWebsocketTransport(
@@ -97,12 +105,25 @@ async def run_bot(
             }
         ]
     )
+    vad_analyzer = SileroVADAnalyzer()
+    turn_analyzer = ObservedSmartTurn(activity)
+    local_models = {
+        "vad": {
+            **activity.models["vad"],
+            **onnx_session_metadata(vad_analyzer._model.session.get_providers()),
+        },
+        "turn": {
+            **activity.models["turn"],
+            **onnx_session_metadata(turn_analyzer._session.get_providers()),
+        },
+    }
+    activity.models.update(local_models)
     user, assistant = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=vad_analyzer,
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer)]
             ),
         ),
     )
@@ -110,7 +131,7 @@ async def run_bot(
     async def send_timing(data: dict) -> None:
         await worker.rtvi.send_server_message(data)
 
-    timings = TurnTimings(send_timing)
+    timings = TurnTimings(send_timing, activity)
 
     class PauseGate(FrameProcessor):
         paused = False
@@ -155,7 +176,7 @@ async def run_bot(
                 profiles=diarization.profiles if diarization else None,
                 forget_speakers=diarization.reset if diarization else None,
             ),
-            HTTPTTS(settings.tts, http),
+            HTTPTTS(settings.tts, http, activity),
             transport.output(),
             assistant,
         ]
@@ -170,6 +191,7 @@ async def run_bot(
         ),
         idle_timeout_secs=settings.idle_seconds,
         processor_unusable_policy=ProcessorUnusablePolicy.CANCEL,
+        observers=[ActivityObserver(activity)],
     )
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
@@ -177,6 +199,20 @@ async def run_bot(
     control_lock = asyncio.Lock()
     last_sequence = -1
     control_failed = False
+    activity_tasks: list[asyncio.Task] = []
+
+    @user.event_handler("on_user_turn_stopped")
+    async def on_turn_stopped(aggregator, strategy, message):
+        if activity.paused or activity.closed:
+            return
+        activity.turn_complete = True
+        activity.set("turn", "complete", "Turn ended" if strategy else "Turn timeout")
+        activity.gate()
+
+    # The pinned aggregator dispatches handlers in detached tasks by default.
+    # Run this content-free status update inline with the turn frame so the
+    # pause flush cannot acknowledge before an older turn callback executes.
+    user._event_handlers["on_user_turn_stopped"].is_sync = True
 
     @worker.event_handler("on_pipeline_error")
     async def on_pipeline_error(worker, frame):
@@ -193,6 +229,12 @@ async def run_bot(
         if greeted:
             return
         greeted = True
+        activity_tasks.extend(
+            [
+                asyncio.create_task(activity.publish(send_timing)),
+                asyncio.create_task(refresh_models(activity, settings, local_models)),
+            ]
+        )
         await worker.queue_frames([LLMRunFrame()])
 
     @worker.rtvi.event_handler("on_client_message")
@@ -215,6 +257,7 @@ async def run_bot(
             try:
                 if data["action"] == "pause" and not gate.paused:
                     gate.paused = llm_gate.paused = True
+                    activity.pause()
                     await stt.pause_input()
                     await rtvi.interrupt_bot()
                     # The pinned user aggregator keeps its turn/SmartTurn/VAD state
@@ -234,15 +277,40 @@ async def run_bot(
                     user._user_turn_start_timestamp = ""
                     vad = user._vad_controller
                     if vad:
+                        # VAD runs in a single-thread executor. Enqueue the reset
+                        # there so an in-flight analysis cannot restore old speech
+                        # after the partial audio and turn have been discarded.
+                        def reset_vad() -> None:
+                            analyzer = vad._vad_analyzer
+                            analyzer._vad_buffer = b""
+                            analyzer._vad_state = VADState.QUIET
+                            analyzer._vad_starting_count = 0
+                            analyzer._vad_stopping_count = 0
+                            analyzer._prev_volume = 0.0
+                            analyzer._volume_tracker = type(analyzer._volume_tracker)()
+                            analyzer._model.reset_states()
+                            analyzer._windows_since_reset = 0
+                            analyzer._low_confidence_windows = 0
+
+                        await asyncio.wait_for(
+                            asyncio.get_running_loop().run_in_executor(
+                                vad_analyzer._executor, reset_vad
+                            ),
+                            timeout=3,
+                        )
                         vad._vad_state = VADState.QUIET
-                        vad._vad_analyzer._vad_state = VADState.QUIET
-                        vad._vad_analyzer._model.reset_states()
                     await controller.start()
                     if timings.pending:
                         await timings.pending.finish("interrupted")
                         timings.pending = None
+                    # interrupt_bot only enqueues interruption frames. Wait for
+                    # the pinned worker's downstream/upstream flush before ack.
+                    async with asyncio.timeout(4):
+                        if not await worker.flush_pipeline(timeout=2):
+                            raise RuntimeError("Pipeline did not stop")
                 elif data["action"] == "resume" and gate.paused:
                     stt.resume_input()
+                    activity.resume()
                     gate.paused = llm_gate.paused = False
                 await rtvi.send_server_message(
                     {
@@ -265,3 +333,11 @@ async def run_bot(
         await runner.run()
     finally:
         await runner.cancel()
+        activity.close()
+        for task in activity_tasks:
+            task.cancel()
+        for task in activity_tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if diarization:
+            diarization.activity = None

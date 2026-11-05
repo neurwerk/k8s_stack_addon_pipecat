@@ -8,6 +8,7 @@ import {
   WavMediaManager,
 } from "@pipecat-ai/small-webrtc-transport";
 import { parseTiming, type TurnTiming } from "./timings";
+import { endActivity, parseActivity, type PipelineActivity } from "./activity";
 
 export interface ChatError {
   text: string;
@@ -22,6 +23,59 @@ function websocketAudioManager(isPaused: () => boolean) {
   const manager = new WavMediaManager(512, 16000);
   const buffer = manager.bufferBotAudio.bind(manager);
   const interrupt = manager.interruptBotAudio.bind(manager);
+  // The pinned player's offset poll has no timeout. Use its worklet protocol
+  // directly so a missing acknowledgement fails the call, not the next reply.
+  const player = Reflect.get(manager, "_wavStreamPlayer") as {
+    stream: AudioWorkletNode | null;
+    context: AudioContext;
+    analyser: AnalyserNode;
+    interruptedTrackIds: Record<string, boolean>;
+    trackSampleOffsets: Record<string, unknown>;
+    getTrackSampleOffset: (interrupt?: boolean) => Promise<unknown>;
+  };
+  const getOffset = player.getTrackSampleOffset.bind(player);
+  player.getTrackSampleOffset = (stop = false) => {
+    if (!stop || !player.stream) return getOffset(stop);
+    const stream = player.stream;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const finish = () => {
+        clearTimeout(timer);
+        stream.port.removeEventListener("message", onMessage);
+        delete player.trackSampleOffsets[requestId];
+      };
+      const onMessage = (event: MessageEvent) => {
+        const data: unknown = event.data;
+        if (!object(data) || data.event !== "offset" || data.requestId !== requestId) return;
+        finish();
+        if (typeof data.trackId === "string") player.interruptedTrackIds[data.trackId] = true;
+        resolve(data);
+      };
+      const timer = setTimeout(() => {
+        finish();
+        reject(new Error("Bot audio interruption timed out"));
+      }, 1500);
+      stream.port.addEventListener("message", onMessage);
+      stream.port.postMessage({ event: "interrupt", requestId });
+    });
+  };
+  let gain: GainNode | undefined;
+  let routed: AudioWorkletNode | null = null;
+  function routeAudio(): void {
+    const stream = player.stream;
+    if (!stream) return;
+    if (!gain) {
+      gain = player.context.createGain();
+      gain.connect(player.context.destination);
+    }
+    if (routed !== stream) {
+      stream.disconnect();
+      stream.connect(gain);
+      stream.connect(player.analyser);
+      routed = stream;
+    }
+    gain.gain.value = isPaused() ? 0 : 1;
+  }
   let playback = 0;
   let interrupting: Promise<void> | undefined;
   let pending: Int16Array[] = [];
@@ -33,17 +87,15 @@ function websocketAudioManager(isPaused: () => boolean) {
       pending.push(data);
       return;
     }
-    return buffer(data, id ?? `reply-${playback}`);
+    const result = buffer(data, id ?? `reply-${playback}`);
+    routeAudio();
+    return result;
   };
   manager.interruptBotAudio = () => {
     if (isPaused()) {
-      // Disconnect the output synchronously: the worklet's interrupt reply
-      // arrives asynchronously and must not leave bot speech audible.
+      // Mute synchronously, keeping the worklet alive for its interrupt reply.
       pending = [];
-      const player = Reflect.get(manager, "_wavStreamPlayer") as {
-        stream: AudioWorkletNode | null;
-      };
-      player.stream?.disconnect();
+      if (gain) gain.gain.value = 0;
     }
     if (interrupting) return interrupting;
     playback++;
@@ -53,11 +105,9 @@ function websocketAudioManager(isPaused: () => boolean) {
       } finally {
         // The pinned player does not expose a reset method. Its worklet sends
         // "stop" asynchronously; detach it before feeding the next reply.
-        const player = Reflect.get(manager, "_wavStreamPlayer") as {
-          stream: AudioWorkletNode | null;
-        };
         player.stream?.disconnect();
         player.stream = null;
+        routed = null;
         const queued = pending;
         pending = [];
         interrupting = undefined;
@@ -110,6 +160,7 @@ export function initializeSession(
   onNotices: (notices: string[]) => void,
   onErrors: (errors: ChatError[]) => void,
   onPaused: (paused: boolean) => void,
+  onActivity: (activity: PipelineActivity | undefined) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -143,6 +194,7 @@ export function initializeSession(
     timings: TurnTiming[];
     notices: string[];
     errors: ChatError[];
+    activity?: PipelineActivity;
     pollingNotices?: boolean;
     paused: boolean;
     controlPending?: {
@@ -205,6 +257,7 @@ export function initializeSession(
     if (attempt.polling) clearInterval(attempt.polling);
     if (active === attempt) {
       onSpeaking(false);
+      onActivity(endActivity(attempt.activity));
       attempt.timings = attempt.timings.map((timing) =>
         ["complete", "no-audio", "failed", "interrupted"].includes(timing.status)
           ? timing
@@ -299,6 +352,14 @@ export function initializeSession(
             status.textContent = pending.paused
               ? "Conversation paused."
               : "Connected. You can speak now.";
+          }
+          return;
+        }
+        const activity = parseActivity(data);
+        if (activity) {
+          if (!attempt.activity || activity.at_ms >= attempt.activity.at_ms) {
+            attempt.activity = activity;
+            onActivity(activity);
           }
           return;
         }
@@ -511,6 +572,7 @@ export function initializeSession(
     onPaused(false);
     enableAudio.hidden = true;
     onTimings([]);
+    onActivity(undefined);
     onNotices([]);
     onErrors([]);
     onSpeaking(false);
@@ -542,6 +604,8 @@ export function initializeSession(
         if (attempt.mediaConnected || attempt.serviceError || !network)
           throw error;
         await disconnectOwn(attempt);
+        attempt.activity = undefined;
+        onActivity(undefined);
         check(attempt);
         attempt.serverCancel = mutation("/api/cancel");
         const cancelled = await attempt.serverCancel;

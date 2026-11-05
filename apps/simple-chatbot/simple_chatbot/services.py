@@ -2,8 +2,10 @@
 
 import asyncio
 import codecs
+import contextlib
 import io
 import json
+import re
 import time
 import wave
 from collections import deque
@@ -31,6 +33,7 @@ from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.text.transforms import strip_markdown
 from pipecat.utils.time import time_now_iso8601
 
+from simple_chatbot.activity import Activity
 from simple_chatbot.config import ConversationOptions, Settings, Speech
 from simple_chatbot.diarization import DiarizationError, DiarizationSession, SpeakerSpan
 from simple_chatbot.notices import NoticeSplitter, SpeechControlFilter
@@ -282,9 +285,23 @@ class GatewayLLM(FrameProcessor):
         self.credential = credential
         self.notice = notice
         self.timings = timings
+        self.activity = timings.activity if timings else None
         self.options = options or ConversationOptions()
         self.profiles = profiles
         self.forget_speakers = forget_speakers
+
+    def _observe_event(self, event: dict) -> None:
+        if not self.activity:
+            return
+        provider = event.get("provider")
+        if isinstance(provider, str) and re.fullmatch(r"[A-Za-z0-9 ._/-]{1,80}", provider):
+            if "llm" in self.activity.models:
+                self.activity.models["llm"]["upstream_provider"] = provider
+        if any(
+            (choice.get("delta", {}).get("content") or "").strip()
+            for choice in event.get("choices", [])
+        ):
+            self.activity.set("llm", "active", "Streaming response")
 
     async def _speaker_tool(self, tool: _SpeakerToolCall, turn: int, generation: int) -> dict:
         profiles = self.profiles
@@ -356,6 +373,7 @@ class GatewayLLM(FrameProcessor):
                         ) as response:
                             response.raise_for_status()
                             async for event in bounded_sse(response, allow_tools=True):
+                                self._observe_event(event)
                                 for choice in event.get("choices", []):
                                     delta = choice["delta"]
                                     if delta.get("tool_calls"):
@@ -387,7 +405,16 @@ class GatewayLLM(FrameProcessor):
                     # Mark before awaiting: cancellation or follow-up failure must
                     # never replay a possibly completed remote deletion.
                     mutated = True
-                    result = await self._speaker_tool(tool, turn, generation)
+                    with (
+                        self.activity.work("tool", "Updating speaker profiles")
+                        if self.activity
+                        else contextlib.nullcontext()
+                    ):
+                        if self.activity:
+                            self.activity.set("llm", "waiting", "Waiting for speaker tool")
+                        result = await self._speaker_tool(tool, turn, generation)
+                    if self.activity:
+                        self.activity.set("llm", "active", "Requesting follow-up")
                     history.extend(
                         [
                             {
@@ -432,6 +459,16 @@ class GatewayLLM(FrameProcessor):
         if not isinstance(frame, LLMContextFrame):
             await self.push_frame(frame, direction)
             return
+        with (
+            self.activity.work("llm", "Requesting model")
+            if self.activity
+            else contextlib.nullcontext()
+        ):
+            if self.activity:
+                self.activity.set("ready", "complete", "Response started")
+            await self._respond(frame)
+
+    async def _respond(self, frame: LLMContextFrame):
         speaker_turn = self.profiles.begin_response() if self.profiles else None
         timing = await self.timings.begin_llm() if self.timings else None
         start = LLMFullResponseStartFrame()
@@ -478,6 +515,7 @@ class GatewayLLM(FrameProcessor):
                         response.raise_for_status()
                         content_size = 0
                         async for event in bounded_sse(response):
+                            self._observe_event(event)
                             for choice in event.get("choices", []):
                                 delta = choice.get("delta", {})
                                 # Reasoning, tool calls and metadata are never speech.
@@ -539,6 +577,8 @@ class GatewayLLM(FrameProcessor):
                 await timing.finish("interrupted")
             raise
         finally:
+            if self.activity and timing and timing.status in ("failed", "interrupted"):
+                self.activity.set("llm", timing.status, timing.status.capitalize())
             await self.push_frame(LLMFullResponseEndFrame())
 
 
@@ -554,6 +594,7 @@ class HTTPSTT(SegmentedSTTService):
         self.speech = settings
         self.http = http
         self.timings = timings
+        self.activity = timings.activity if timings else None
         self.diarization = diarization
         self._speaker_segments: deque[asyncio.Future[SpeakerSpan]] = deque()
         self._input_paused = False
@@ -607,6 +648,15 @@ class HTTPSTT(SegmentedSTTService):
             self._audio_buffer.clear()
             self._user_speaking = False
             return
+        if self.activity:
+            self.activity.transcript_ready = False
+            self.activity.set(
+                "stt",
+                "active" if self.activity.operations["stt"] else "waiting",
+                "Transcribing; more audio queued"
+                if self.activity.operations["stt"]
+                else "Segment queued",
+            )
         if self.diarization and self.is_usable:
             try:
                 start = self.diarization.position - len(self._audio_buffer) // 2
@@ -619,6 +669,17 @@ class HTTPSTT(SegmentedSTTService):
         await super()._handle_user_stopped_speaking(frame)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        with (
+            self.activity.work("stt", "Transcribing segment")
+            if self.activity
+            else contextlib.nullcontext()
+        ) as token:
+            async for frame in self._transcribe(audio, token):
+                yield frame
+
+    async def _transcribe(
+        self, audio: bytes, token: int | None
+    ) -> AsyncGenerator[Frame | None, None]:
         segment = self._speaker_segments.popleft() if self.diarization else None
         timing = await self.timings.begin_stt() if self.timings else None
         audio_seconds = None
@@ -629,6 +690,7 @@ class HTTPSTT(SegmentedSTTService):
             except (wave.Error, EOFError):
                 pass
         started = time.monotonic()
+        transcribed = False
         try:
             async with self.http.stream(
                 "POST",
@@ -657,17 +719,48 @@ class HTTPSTT(SegmentedSTTService):
                         time.monotonic() - started, len(text.split()), audio_seconds
                     )
                 speaker = ""
+                transcribed = True
+                if self.activity and token is not None:
+                    self.activity.end("stt", token, "complete", "Transcript received")
                 if self.diarization and segment:
-                    span = await asyncio.wait_for(
-                        asyncio.shield(segment), self.diarization.settings.timeout_seconds * 2
-                    )
-                    text, speaker = attribute_transcript(payload, span, self.diarization.profiles)
+                    if self.activity:
+                        self.activity.set("attribution", "waiting", "Waiting for speaker results")
+                    wait_seconds = 0.0
+                    if segment.done():
+                        span = segment.result()
+                    else:
+                        waiting = time.monotonic()
+                        span = await asyncio.wait_for(
+                            asyncio.shield(segment), self.diarization.settings.timeout_seconds * 2
+                        )
+                        wait_seconds = time.monotonic() - waiting
+                    if timing:
+                        await timing.speakers_finalized(span.finalization_seconds, wait_seconds)
+                    with (
+                        self.activity.work("attribution", "Aligning words and speakers")
+                        if self.activity
+                        else contextlib.nullcontext()
+                    ):
+                        text, speaker = attribute_transcript(
+                            payload, span, self.diarization.profiles
+                        )
+                if self.activity:
+                    self.activity.transcript_ready = self._segment_queue.empty()
+                    self.activity.gate()
                 yield TranscriptionFrame(text, speaker, time_now_iso8601())
         except (httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError):
+            if self.activity:
+                self.activity.set(
+                    "attribution" if transcribed else "stt",
+                    "failed",
+                    "Speaker attribution failed" if transcribed else "Transcription failed",
+                )
             if timing:
                 await timing.finish("failed")
             await self.push_error("Speech recognition failed", force_treat_as_permanent=True)
         except asyncio.CancelledError:
+            if self.activity and transcribed:
+                self.activity.set("attribution", "interrupted", "Interrupted")
             if timing:
                 await timing.finish("interrupted")
             raise
@@ -683,7 +776,7 @@ async def speech_text(text: str, text_type: str) -> str:
 
 
 class HTTPTTS(TTSService):
-    def __init__(self, settings: Speech, http: httpx.AsyncClient):
+    def __init__(self, settings: Speech, http: httpx.AsyncClient, activity: Activity | None = None):
         super().__init__(
             sample_rate=24000,
             push_start_frame=True,
@@ -698,6 +791,7 @@ class HTTPTTS(TTSService):
         )
         self.speech = settings
         self.http = http
+        self.activity = activity
         self.timing: TurnTiming | None = None
         self._synthesis_failed = False
 
@@ -734,7 +828,35 @@ class HTTPTTS(TTSService):
                 "complete" if self.timing.first_audio_at is not None else "no-audio"
             )
 
+    async def _handle_text(self, frame):
+        if self.activity:
+            self.activity.set("buffer", "waiting", "Waiting for sentence boundary")
+        await super()._handle_text(frame)
+
+    async def _handle_aggregated_text(self, frame, context_id=None):
+        if self.activity:
+            self.activity.set("buffer", "active", "Preparing sentence")
+        await super()._handle_aggregated_text(frame, context_id)
+        if self.activity and self.activity.states["buffer"]["status"] != "interrupted":
+            self.activity.set("buffer", "waiting", "Waiting for sentence boundary")
+
+    async def _handle_llm_response_end(self, frame, direction):
+        await super()._handle_llm_response_end(frame, direction)
+        if self.activity and self.activity.states["buffer"]["status"] != "interrupted":
+            self.activity.set("buffer", "complete", "All text submitted")
+
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        with (
+            self.activity.work("tts", "Requesting speech audio")
+            if self.activity
+            else contextlib.nullcontext()
+        ):
+            if self.activity:
+                self.activity.set("buffer", "waiting", "Waiting for current TTS request")
+            async for frame in self._synthesize(text, context_id):
+                yield frame
+
+    async def _synthesize(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         self._synthesis_failed = False
         started = time.monotonic()
         first_audio_ms = None
@@ -775,6 +897,8 @@ class HTTPTTS(TTSService):
                             pass
                 response.raise_for_status()
                 async for audio in bounded_pcm(response):
+                    if self.activity:
+                        self.activity.set("tts", "active", "Receiving speech audio")
                     if first_audio_ms is None:
                         first_audio_ms = round((time.monotonic() - started) * 1000)
                     audio_bytes += len(audio)
@@ -783,6 +907,8 @@ class HTTPTTS(TTSService):
                     yield TTSAudioRawFrame(audio, 24000, 1, context_id=context_id)
         except (httpx.HTTPError, ValueError) as error:
             self._synthesis_failed = True
+            if self.activity:
+                self.activity.set("tts", "failed", "Speech synthesis failed")
             outcome = "failed"
             if timing:
                 await timing.finish("failed")

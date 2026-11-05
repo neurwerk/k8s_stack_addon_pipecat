@@ -1,7 +1,9 @@
 """Synthetic pipeline control regressions; no live microphones or model calls."""
 
 import asyncio
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -19,6 +21,10 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
     async def test_pause_waits_for_transcription_and_interruption_before_ack(self):
         started = asyncio.Event()
         release = asyncio.Event()
+        vad_release = threading.Event()
+        vad_started = threading.Event()
+        flush_started = asyncio.Event()
+        flush_release = asyncio.Event()
         acknowledgements = []
         gates = []
         previous_context = LLMContext([{"role": "user", "content": "earlier turn"}])
@@ -55,12 +61,18 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         class FakeWorker:
             def __init__(self, pipeline, **kwargs):
                 self.pipeline = pipeline
+                self.observers = kwargs["observers"]
                 self.rtvi = FakeRTVI()
                 self.handlers = {}
                 gates.extend(p for p in pipeline.processors if type(p).__name__ == "PauseGate")
 
             def event_handler(self, name):
                 return lambda callback: self.handlers.setdefault(name, callback)
+
+            async def flush_pipeline(self, **kwargs):
+                flush_started.set()
+                await flush_release.wait()
+                return True
 
         class FakeRunner:
             async def add_workers(self, worker):
@@ -71,6 +83,14 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
 
             async def run(self):
                 handle = self.worker.rtvi.handlers["on_client_message"]
+
+                def pending_vad():
+                    vad_started.set()
+                    vad_release.wait()
+                    vad_analyzer._vad_buffer = b"old speech"
+
+                vad_analyzer._executor.submit(pending_vad)
+                await asyncio.wait_for(asyncio.to_thread(vad_started.wait), 1)
 
                 def message(action, sequence):
                     return SimpleNamespace(
@@ -85,6 +105,12 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
                 assert not acknowledgements
                 release.set()
+                await asyncio.sleep(0)
+                assert not acknowledgements  # The VAD executor has not drained yet.
+                vad_release.set()
+                await asyncio.wait_for(flush_started.wait(), 1)
+                assert not acknowledgements  # Enqueued interruption is not a barrier.
+                flush_release.set()
                 await asyncio.gather(pausing, resuming)
                 await handle(self.worker.rtvi, message("pause", 2))  # stale
                 await handle(self.worker.rtvi, message("resume", 4))  # idempotent
@@ -102,6 +128,7 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
                 assert all(gate.paused for gate in gates)
 
         user = FrameProcessor()
+        user._register_event_handler("on_user_turn_stopped")
         user.reset = AsyncMock()
         strategy = SimpleNamespace(handle_user_turn_stopped=AsyncMock())
         controller = SimpleNamespace(
@@ -112,8 +139,22 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
             user_turn_strategies=SimpleNamespace(stop=[strategy]),
         )
         user._user_turn_controller = controller
-        model = SimpleNamespace(reset_states=Mock())
-        vad_analyzer = SimpleNamespace(_vad_state=None, _model=model)
+        model = SimpleNamespace(
+            reset_states=Mock(),
+            session=SimpleNamespace(get_providers=Mock(return_value=["CPUExecutionProvider"])),
+        )
+        vad_analyzer = SimpleNamespace(
+            _vad_state=None,
+            _model=model,
+            _vad_buffer=b"partial speech",
+            _vad_starting_count=2,
+            _vad_stopping_count=0,
+            _prev_volume=0.8,
+            _volume_tracker=SimpleNamespace(),
+            _windows_since_reset=10,
+            _low_confidence_windows=2,
+            _executor=ThreadPoolExecutor(max_workers=1),
+        )
         user._vad_controller = SimpleNamespace(_vad_state=None, _vad_analyzer=vad_analyzer)
         user._full_user_turn_aggregation = "unfinished"
         user._user_turn_interrupted_bot = True
@@ -137,8 +178,15 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "simple_chatbot.bot.LLMContextAggregatorPair", return_value=(user, FrameProcessor())
             ),
-            patch("simple_chatbot.bot.SileroVADAnalyzer"),
-            patch("simple_chatbot.bot.LocalSmartTurnAnalyzerV3"),
+            patch("simple_chatbot.bot.SileroVADAnalyzer", return_value=vad_analyzer),
+            patch(
+                "simple_chatbot.bot.ObservedSmartTurn",
+                return_value=SimpleNamespace(
+                    _session=SimpleNamespace(
+                        get_providers=Mock(return_value=["CPUExecutionProvider"])
+                    )
+                ),
+            ),
             patch("simple_chatbot.bot.PipelineWorker", FakeWorker),
             patch("simple_chatbot.bot.WorkerRunner", return_value=runner),
         ):
@@ -151,12 +199,17 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
                 diarization=profile_store,
             )
         await http.aclose()
+        vad_analyzer._executor.shutdown(wait=True)
 
         self.assertEqual([entry["paused"] for entry in acknowledgements], [True, False, False])
+        self.assertEqual(runner.worker.observers[0].activity.models["vad"]["compute"], "CPU")
+        self.assertEqual(runner.worker.observers[0].activity.models["turn"]["compute"], "CPU")
         self.assertIs(llm_factory.call_args.kwargs["profiles"], profiles)
         self.assertIsNone(user._full_user_turn_aggregation)
         self.assertFalse(controller._user_turn)
         self.assertEqual(user._vad_controller._vad_state.name, "QUIET")
+        self.assertEqual(vad_analyzer._vad_buffer, b"")
+        self.assertEqual(vad_analyzer._vad_starting_count, 0)
         self.assertEqual(stt.pause_input.await_count, 3)
         stt.resume_input.assert_called_once()
         self.assertEqual(len(gates), 2)
