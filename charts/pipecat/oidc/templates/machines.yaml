@@ -48,9 +48,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
-          resources:
-            requests: {cpu: 50m, memory: 64Mi}
-            limits: {cpu: 200m, memory: 256Mi}
+          resources: {{ toYaml $.Values.pipecat.machineIdentity.resources | nindent 12 }}
           env:
             - {name: KC_INTERNAL_URL, value: "http://auth-keycloak-keycloak-service.auth-keycloak.svc.cluster.local"}
             - {name: KC_ADMIN_USER, value: {{ required "authKeycloak.adminUser is required" $.Values.authKeycloak.adminUser | quote }}}
