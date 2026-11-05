@@ -74,6 +74,9 @@
       "type": "object", "additionalProperties": false, "required": ["url", "secretRef"],
       "properties": {
         "url": {"type": "string", "pattern": "^wss?://[^\\s/?#@]+/v1/diarization/stream$"},
+        "modelName": {"type": "string", "minLength": 1, "maxLength": 200},
+        "modelRevision": {"type": "string", "minLength": 1, "maxLength": 200},
+        "compute": {"enum": ["CPU", "GPU"]},
         "secretRef": {
           "type": "object", "additionalProperties": false, "required": ["name", "key"],
           "properties": {"name": {"type": "string", "minLength": 1}, "key": {"type": "string", "minLength": 1}}
