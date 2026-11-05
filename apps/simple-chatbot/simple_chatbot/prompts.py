@@ -7,7 +7,8 @@ def initial_prompt(speaker_profiles: bool) -> str:
         "Zeige kurz und verständlich, was du kannst. "
         "Antworte auf Deutsch. Deine Antworten werden vorgelesen; "
         "vermeide deshalb besondere Formatierungen. "
-        "Halte deine Antworten kurz. Stelle dich zu Beginn vor."
+        "Halte deine Antworten kurz und beginne direkt mit dem Inhalt. "
+        "Vermeide Floskeln wie 'Gern'. Stelle dich zu Beginn vor."
         + (
             " Wenn Namen von Sprechern gespeichert sind, begrüße die Gruppe, "
             "ohne jemandem eine Stimme zuzuordnen, bevor die Person gesprochen hat. "

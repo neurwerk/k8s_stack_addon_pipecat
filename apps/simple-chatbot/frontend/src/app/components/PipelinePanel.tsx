@@ -43,21 +43,12 @@ export function PipelinePanel({ activity, micEnabled, paused }: { activity?: Pip
   const stale = !!activity?.live && now - activity.receivedAt > 2500;
   const live = !!activity?.live && !stale;
   const conversationPaused = paused || (live && activity?.paused);
-  const interruption = conversationPaused ? undefined : activity?.interruption;
+  const interruption = activity?.interruption;
+  const bargeInActive = live && !conversationPaused && activity && interruption &&
+    activity.at_ms - interruption.at_ms + Math.max(0, now - activity.receivedAt) < 2000;
   return (
     <details className="rounded-xl border bg-card p-5">
       <summary className="cursor-pointer font-medium">Live voice pipeline</summary>
-      <p className="mt-2 text-xs text-muted-foreground">{conversationPaused ? "Conversation paused" : stale ? "Activity connection delayed — last known state" : live ? "Live · microphone " + (micEnabled ? "enabled" : "muted") : activity ? "Conversation ended · last activity" : "Start a conversation to see activity"}</p>
-      <p className="mt-2 text-xs text-muted-foreground">● Dark: active · ○ Grey: waiting · ✓ Complete · ↯ Interrupted. Arrows show dependencies; streaming stages can overlap.</p>
-      {interruption && <div role="status" className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-        <h3 className="font-semibold">↯ Barge-in</h3>
-        <p className="mt-1">Detected at {(interruption.at_ms / 1000).toFixed(2)} s.</p>
-        <p className="mt-1">{interruption.output_was_active
-          ? interruption.output_stopped_ms === undefined
-            ? " Waiting for server output to stop."
-            : ` Server output stopped ${Math.round(interruption.output_stopped_ms - interruption.at_ms)} ms later.`
-          : " Interrupted response generation; server output was not active."}</p>
-      </div>}
       <div className="pipeline-layout mt-4" aria-label="Pipeline dependency graph">
         <div className="pipeline-graph">
           <svg aria-hidden="true" className="pipeline-edges text-muted-foreground" viewBox="0 0 1070 480">
@@ -75,6 +66,12 @@ export function PipelinePanel({ activity, micEnabled, paused }: { activity?: Pip
               {stage === "input" || stage === "output" || !activity?.models[stage] ? <p className="mt-2 text-[11px] opacity-70">{stage === "input" ? "Browser → app" : stage === "output" ? "App → browser · playback unmeasured" : "App process"}</p> : null}
             </div>;
           })}
+          <div className={`pipeline-node rounded-lg border px-3 py-2 shadow-sm transition-colors ${bargeInActive ? `${colors.interrupted} ring-2 ring-amber-400` : colors.off}`} style={{ "--node-x": "0%", "--node-y": `${340 / 480 * 100}%` } as CSSProperties}>
+            <h3 className="text-sm font-semibold">↯ Barge-in</h3>
+            <p role="status" className="mt-1 text-xs">
+              {bargeInActive ? "Interruption detected" : conversationPaused ? "Conversation paused" : live ? "Listening" : "Inactive"}
+            </p>
+          </div>
         </div>
       </div>
     </details>
