@@ -44,6 +44,23 @@ class BrowserMessages:
         data = value.get("data")
         if (
             self.ready
+            and set(value) == {"id", "label", "type", "data"}
+            and value.get("label") == "rtvi-ai"
+            and value.get("type") == "client-message"
+            and isinstance(value.get("id"), str)
+            and len(value["id"]) <= 128
+            and isinstance(data, dict)
+            and set(data) == {"t", "d"}
+            and data.get("t") == "conversation-control"
+            and isinstance(data.get("d"), dict)
+            and set(data["d"]) == {"action", "sequence"}
+            and data["d"]["action"] in ("pause", "resume")
+            and type(data["d"]["sequence"]) is int
+            and 0 <= data["d"]["sequence"] <= 1000000
+        ):
+            return True
+        if (
+            self.ready
             or set(value) - {"id", "label", "type", "data"}
             or value.get("label") != "rtvi-ai"
             or value.get("type") != "client-ready"

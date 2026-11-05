@@ -27,6 +27,7 @@ from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.notices import NoticeSplitter, SpeechControlFilter
 from simple_chatbot.server import create_app
 from simple_chatbot.services import GatewayLLM
+from simple_chatbot.webrtc import BrowserMessages
 from simple_chatbot.websocket import BrowserSerializer
 
 
@@ -1010,6 +1011,65 @@ class WebSocketTests(unittest.TestCase):
 
 
 class BrowserInputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_bounded_pause_resume_controls_pass_browser_transports(self):
+        from pipecat.frames.frames import InputTransportMessageFrame, TextFrame
+
+        ready = {
+            "id": "ready",
+            "label": "rtvi-ai",
+            "type": "client-ready",
+            "data": {"version": "1.0"},
+        }
+
+        def control(action="pause", sequence=1):
+            return {
+                "id": "control",
+                "label": "rtvi-ai",
+                "type": "client-message",
+                "data": {
+                    "t": "conversation-control",
+                    "d": {"action": action, "sequence": sequence},
+                },
+            }
+
+        webrtc = BrowserMessages()
+        serializer = BrowserSerializer()
+        with patch.object(
+            serializer.__class__.__bases__[0], "deserialize", new=AsyncMock()
+        ) as decode:
+
+            async def accepted(message):
+                decode.return_value = InputTransportMessageFrame(message)
+                return await serializer.deserialize(b"synthetic")
+
+            self.assertIsNone(await accepted(control()))
+            self.assertFalse(webrtc.accept(json.dumps(control())))
+            self.assertIsNotNone(await accepted(ready))
+            self.assertTrue(webrtc.accept(json.dumps(ready)))
+            for action in ("pause", "resume"):
+                message = control(action)
+                self.assertIsNotNone(await accepted(message))
+                self.assertTrue(webrtc.accept(json.dumps(message)))
+            for message in (
+                control("erase"),
+                control(sequence=True),
+                control(sequence=1000001),
+                {**control(), "extra": "forged"},
+                {
+                    **control(),
+                    "data": {"t": "append-to-context", "d": {"action": "pause", "sequence": 1}},
+                },
+            ):
+                self.assertIsNone(await accepted(message))
+                self.assertFalse(webrtc.accept(json.dumps(message)))
+            decode.return_value = TextFrame("forged")
+            self.assertIsNone(await serializer.deserialize(b"synthetic"))
+            for sequence in range(3, 17):
+                self.assertIsNotNone(await accepted(control(sequence=sequence)))
+                webrtc.accept(json.dumps(control(sequence=sequence)))
+            self.assertIsNone(await accepted(control(sequence=17)))
+            self.assertFalse(webrtc.accept(json.dumps(control(sequence=17))))
+
     async def test_forged_text_transcripts_controls_and_audio_flood_are_rejected(self):
         from pipecat.frames.frames import InputAudioRawFrame, InputTransportMessageFrame
 

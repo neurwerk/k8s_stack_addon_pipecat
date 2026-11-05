@@ -5,6 +5,7 @@
 
 """App-owned voice pipeline: independent context and processors per connection."""
 
+import asyncio
 from collections.abc import Callable
 
 import httpx
@@ -12,7 +13,14 @@ from fastapi import WebSocket
 from loguru import logger
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.audio.vad.vad_analyzer import VADState
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    LLMContextFrame,
+    LLMRunFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -20,6 +28,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -102,11 +111,40 @@ async def run_bot(
         await worker.rtvi.send_server_message(data)
 
     timings = TurnTimings(send_timing)
+
+    class PauseGate(FrameProcessor):
+        paused = False
+        llm_boundary = False
+
+        async def process_frame(self, frame, direction: FrameDirection):
+            await super().process_frame(frame, direction)
+            input_frames = (
+                InputAudioRawFrame,
+                LLMRunFrame,
+                VADUserStartedSpeakingFrame,
+                VADUserStoppedSpeakingFrame,
+            )
+            if (
+                self.paused
+                and direction == FrameDirection.DOWNSTREAM
+                and isinstance(
+                    frame, (LLMContextFrame, LLMRunFrame) if self.llm_boundary else input_frames
+                )
+            ):
+                return
+            await self.push_frame(frame, direction)
+
+    gate = PauseGate()
+    llm_gate = PauseGate()
+    llm_gate.llm_boundary = True
+    stt = HTTPSTT(settings.stt, http, timings, diarization=diarization)
     pipeline = Pipeline(
         [
             transport.input(),
-            HTTPSTT(settings.stt, http, timings, diarization=diarization),
+            gate,
+            stt,
             user,
+            llm_gate,
             GatewayLLM(
                 settings,
                 http,
@@ -136,6 +174,9 @@ async def run_bot(
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
     greeted = False
+    control_lock = asyncio.Lock()
+    last_sequence = -1
+    control_failed = False
 
     @worker.event_handler("on_pipeline_error")
     async def on_pipeline_error(worker, frame):
@@ -153,6 +194,68 @@ async def run_bot(
             return
         greeted = True
         await worker.queue_frames([LLMRunFrame()])
+
+    @worker.rtvi.event_handler("on_client_message")
+    async def on_control(rtvi, message):
+        nonlocal last_sequence, control_failed
+        data = message.data
+        if (
+            message.type != "conversation-control"
+            or not isinstance(data, dict)
+            or set(data) != {"action", "sequence"}
+            or data["action"] not in ("pause", "resume")
+            or type(data["sequence"]) is not int
+            or not 0 <= data["sequence"] <= 1000000
+        ):
+            return
+        async with control_lock:
+            if control_failed or data["sequence"] <= last_sequence:
+                return
+            last_sequence = data["sequence"]
+            try:
+                if data["action"] == "pause" and not gate.paused:
+                    gate.paused = llm_gate.paused = True
+                    await stt.pause_input()
+                    await rtvi.interrupt_bot()
+                    # The pinned user aggregator keeps its turn/SmartTurn/VAD state
+                    # across interruptions. Discard only the partial utterance;
+                    # its LLM context (previous turns) and speaker profiles survive.
+                    controller = user._user_turn_controller
+                    await controller.stop()
+                    controller._user_speaking = False
+                    controller._user_turn = False
+                    for strategy in controller.user_turn_strategies.stop or []:
+                        await strategy.handle_user_turn_stopped()
+                        if isinstance(strategy, TurnAnalyzerUserTurnStopStrategy):
+                            strategy._vad_user_speaking = False
+                    await user.reset()
+                    user._full_user_turn_aggregation = None
+                    user._user_turn_interrupted_bot = False
+                    user._user_turn_start_timestamp = ""
+                    vad = user._vad_controller
+                    if vad:
+                        vad._vad_state = VADState.QUIET
+                        vad._vad_analyzer._vad_state = VADState.QUIET
+                        vad._vad_analyzer._model.reset_states()
+                    await controller.start()
+                    if timings.pending:
+                        await timings.pending.finish("interrupted")
+                        timings.pending = None
+                elif data["action"] == "resume" and gate.paused:
+                    stt.resume_input()
+                    gate.paused = llm_gate.paused = False
+                await rtvi.send_server_message(
+                    {
+                        "type": "conversation-control",
+                        "paused": gate.paused,
+                        "sequence": data["sequence"],
+                    }
+                )
+            except Exception:
+                control_failed = True
+                gate.paused = llm_gate.paused = True
+                await stt.pause_input()
+                raise
 
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport, client):

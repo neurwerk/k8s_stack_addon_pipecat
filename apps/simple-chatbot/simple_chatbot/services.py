@@ -556,8 +556,33 @@ class HTTPSTT(SegmentedSTTService):
         self.timings = timings
         self.diarization = diarization
         self._speaker_segments: deque[asyncio.Future[SpeakerSpan]] = deque()
+        self._input_paused = False
+
+    async def pause_input(self) -> None:
+        if self._input_paused:
+            return
+        self._input_paused = True
+        task = self._segment_task
+        await self._cancel_segment_task()
+        if task and not task.done():
+            raise RuntimeError("Speech recognition did not stop")
+        self._audio_buffer.clear()
+        self._user_speaking = False
+        while not self._segment_queue.empty():
+            self._segment_queue.get_nowait()
+        # The diarization session and its profiles survive; only this call's
+        # unfinished transcript attachments are abandoned.
+        self._speaker_segments.clear()
+
+    def resume_input(self) -> None:
+        if not self._input_paused:
+            return
+        self._segment_task = self.create_task(self._segment_task_handler())
+        self._input_paused = False
 
     async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
+        if self._input_paused:
+            return
         # Pinned Pipecat's segmented adapter has an unbounded queue and utterance buffer.
         # Fail closed rather than silently truncating a user's words.
         if len(self._audio_buffer) > 16000 * 2 * 30 or self._segment_queue.qsize() >= 4:
@@ -578,6 +603,10 @@ class HTTPSTT(SegmentedSTTService):
         await super().process_audio_frame(frame, direction)
 
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        if self._input_paused:
+            self._audio_buffer.clear()
+            self._user_speaking = False
+            return
         if self.diarization and self.is_usable:
             try:
                 start = self.diarization.position - len(self._audio_buffer) // 2

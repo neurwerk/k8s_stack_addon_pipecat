@@ -22,13 +22,15 @@ import { initializeSession, type ChatError } from "./session";
 import "./app/globals.css";
 import "./style.css";
 
-function MicrophoneControl() {
+function MicrophoneControl({ paused }: { paused: boolean }) {
   const state = usePipecatClientTransportState();
   const connected = state === "connected" || state === "ready";
   return (
     <UserAudioControl
       size="lg"
-      unavailableText={connected ? undefined : "Microphone off"}
+      unavailableText={
+        paused ? "Conversation paused" : connected ? undefined : "Microphone off"
+      }
     />
   );
 }
@@ -37,6 +39,7 @@ function App() {
   const [model, setModel] = useState("");
   const [timings, setTimings] = useState<TurnTiming[]>([]);
   const [speaking, setSpeaking] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
   const [errors, setErrors] = useState<ChatError[]>([]);
   // No device initialization before an explicit Start click and admission check.
@@ -50,7 +53,10 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors), []);
+  useEffect(
+    () => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors, setPaused),
+    [],
+  );
 
   return (
     <PipecatClientProvider client={client}>
@@ -131,7 +137,7 @@ function App() {
                   <option value="websocket">HTTPS WebSocket</option>
                 </select>
               </label>
-              <MicrophoneControl />
+              <MicrophoneControl paused={paused} />
               <ConnectButtonView id="connect" disabled size="lg">
                 Start conversation
               </ConnectButtonView>
@@ -143,6 +149,9 @@ function App() {
               >
                 End
               </ConnectButtonView>
+              <Button id="pause" disabled variant="outline">
+                Pause
+              </Button>
               <button id="mute" hidden type="button">
                 Mute microphone
               </button>
