@@ -40,7 +40,12 @@ class AppError(ValueError):
 
 
 def identifier(value: str) -> str:
-    if not ID.fullmatch(value) or value in {"turn", "product-values"}:
+    if not ID.fullmatch(value) or value in {
+        "turn",
+        "product-values",
+        "channel-controller",
+        "channel-config",
+    }:
         raise AppError("Invalid app ID")
     return value
 
@@ -135,6 +140,19 @@ class Bundle:
     runtime_version: str
 
 
+def validate_requirements(text: str) -> None:
+    for line in text.replace("\\\n", " ").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*"
+            r"(?:\s+--hash=sha256:[a-f0-9]{64})+",
+            line,
+        ):
+            raise AppError("Dependencies require exact versions and SHA-256 hashes")
+
+
 def package(root: Path, app: str) -> Bundle:
     directory = app_path(root, app)
     config = YAML(typ="safe").load(safe_file(directory, "app.yaml"))
@@ -185,16 +203,7 @@ def package(root: Path, app: str) -> Bundle:
         payload[name] = content
     compile(payload[entrypoint], entrypoint, "exec")
     if requirements is not None:
-        for line in payload[requirements].decode().replace("\\\n", " ").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*"
-                r"(?:\s+--hash=sha256:[a-f0-9]{64})+",
-                line,
-            ):
-                raise AppError("Dependencies require exact versions and SHA-256 hashes")
+        validate_requirements(payload[requirements].decode())
     payload["manifest.json"] = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
     if sum(map(len, payload.values())) > MAX_EXPANDED:
         raise AppError("Expanded bundle limit exceeded")
@@ -454,6 +463,7 @@ def parser() -> argparse.ArgumentParser:
         "validate",
         "publish",
         "update",
+        "promote",
         "enable",
         "disable",
         "status",
@@ -464,19 +474,28 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--apps-dir", type=Path, required=True)
         if name not in {"interactive", "list"}:
             command.add_argument("--app", required=True)
-        if name in {"interactive", "publish", "update", "enable", "disable", "status", "logs"}:
+        if name in {
+            "interactive",
+            "publish",
+            "update",
+            "promote",
+            "enable",
+            "disable",
+            "status",
+            "logs",
+        }:
             command.add_argument(
                 "--client", required=True, help="Explicit operator-selected client identity"
             )
             command.add_argument("--context", required=True)
             command.add_argument("--namespace", required=True)
-        if name in {"interactive", "publish", "update", "enable", "disable"}:
+        if name in {"interactive", "publish", "update", "promote", "enable", "disable"}:
             command.add_argument("--client-repo", type=Path, required=True)
             command.add_argument(
                 "--values", type=Path, required=True, help="Explicit product values file"
             )
             command.add_argument("--yes", action="store_true")
-        if name in {"interactive", "publish", "update"}:
+        if name in {"interactive", "publish", "update", "promote"}:
             command.add_argument(
                 "--endpoint", required=name != "interactive", help="Workstation S3 upload endpoint"
             )
@@ -493,6 +512,12 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument(
                 "--secret-name",
                 help="Runtime S3 Secret name for first publish; existing reference is preserved",
+            )
+        if name == "promote":
+            command.add_argument(
+                "--sha256",
+                required=True,
+                help="Previously uploaded bundle to promote or roll back to",
             )
         if name in {"interactive", "logs"}:
             command.add_argument("--tail", type=int, default=100)
@@ -546,6 +571,60 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(values.bot.get("script", {}), dict):
             raise AppError("Existing script settings must be a mapping")
         bundle = package(args.apps_dir, args.app) if args.command in {"publish", "update"} else None
+        existing = values.bot.get("script", {})
+        if args.command == "promote" or (bundle and existing.get("channel")):
+            from pipecat_tooling.channels import promote, s3_client
+
+            channel = existing.get("channel")
+            runtime = existing.get("runtimeVersion")
+            if (
+                not isinstance(channel, str)
+                or not isinstance(runtime, str)
+                or existing.get("enabled") is not True
+                or existing.get("bucket") != args.bucket
+            ):
+                raise AppError(
+                    "Channel publication requires the selected enabled channel, runtime and bucket"
+                )
+            identifier(channel)
+            if bundle and bundle.runtime_version != runtime:
+                raise AppError(
+                    "Bundle requires a different runtime; adopt that runtime before publishing"
+                )
+            endpoint_url(args.endpoint, local_http=args.allow_local_http)
+            confirm(
+                args,
+                f"{args.command} channel={channel} (automatically deploys to channel followers)",
+            )
+            if bundle:
+                publish(
+                    bundle,
+                    args.app,
+                    args.endpoint,
+                    args.bucket,
+                    allow_local_http=args.allow_local_http,
+                )
+            client = s3_client(args.endpoint)
+            try:
+                record = promote(
+                    client,
+                    args.bucket,
+                    args.app,
+                    channel,
+                    bundle.sha256 if bundle else args.sha256,
+                    runtime,
+                )
+            finally:
+                client.close()
+            print(
+                f"Channel {channel} promoted: sha256={record['sha256']} "
+                f"revision={record['revision']}"
+            )
+            print(
+                "Client files unchanged; channel followers will reconcile automatically. "
+                "Use status to verify rollout."
+            )
+            return 0
         if bundle:
             existing = values.bot.get("script", {})
             secret = existing.get("secretName") or args.secret_name

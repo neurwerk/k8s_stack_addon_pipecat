@@ -110,6 +110,106 @@ class DeploymentBehaviorTests(unittest.TestCase):
                 script[field] = original
                 before = templates()
 
+    def test_channel_followers_have_isolated_policy_and_rollout_permissions(self):
+        product = self.values["pipecat"]
+        before = self.render("app")
+        product["channels"] = {
+            "image": "ghcr.io/example/pipecat-tooling:0.2.4@sha256:" + "1" * 64,
+            "apiServerCIDR": "192.168.50.2/32",
+        }
+        script = product["bots"][0]["script"]
+        script.update(channel="dev", runtimeVersion="0.2.0")
+        after = self.render("app")
+        resources = {(item["kind"], item["metadata"]["name"]): item for item in after}
+        changed = [
+            item["metadata"]["name"]
+            for item in before
+            if resources[(item["kind"], item["metadata"]["name"])] != item
+        ]
+        self.assertEqual(changed, ["pipecat-example"])
+        pod = resources[("Deployment", "pipecat-example")]["spec"]["template"]
+        self.assertNotIn("pipecat.neurwerk.com/channel-release", pod["metadata"]["annotations"])
+        env = {entry["name"]: entry for entry in pod["spec"]["initContainers"][0]["env"]}
+        self.assertEqual(env["BUNDLE_APP_ID"]["value"], "example")
+        self.assertEqual(env["BUNDLE_RUNTIME_VERSION"]["value"], "0.2.0")
+        self.assertEqual(
+            env["BUNDLE_CHANNEL_RELEASE"]["valueFrom"],
+            {
+                "fieldRef": {
+                    "fieldPath": "metadata.annotations['pipecat.neurwerk.com/channel-release']"
+                }
+            },
+        )
+        self.assertEqual(env["S3_KEY"]["value"], script["key"])
+        self.assertEqual(env["BUNDLE_SHA256"]["value"], script["sha256"])
+        controller = next(
+            x
+            for x in after
+            if x["kind"] == "Deployment" and x["metadata"]["name"] == "pipecat-channel-controller"
+        )
+        self.assertTrue(controller["spec"]["template"]["spec"]["automountServiceAccountToken"])
+        container = controller["spec"]["template"]["spec"]["containers"][0]
+        kube_path = next(e["value"] for e in container["env"] if e["name"] == "KUBECONFIG")
+        mount = next(
+            m for m in container["volumeMounts"] if Path(kube_path).parent == Path(m["mountPath"])
+        )
+        volume = next(
+            v
+            for v in controller["spec"]["template"]["spec"]["volumes"]
+            if v["name"] == mount["name"]
+        )
+        data = resources[("ConfigMap", volume["configMap"]["name"])]["data"]
+        kubeconfig = json.loads(data[Path(kube_path).name])
+        context = next(
+            c["context"]
+            for c in kubeconfig["contexts"]
+            if c["name"] == kubeconfig["current-context"]
+        )
+        cluster = next(
+            c["cluster"] for c in kubeconfig["clusters"] if c["name"] == context["cluster"]
+        )
+        user = next(u["user"] for u in kubeconfig["users"] if u["name"] == context["user"])
+        self.assertEqual(
+            cluster,
+            {
+                "server": "https://kubernetes.default.svc",
+                "certificate-authority": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+            },
+        )
+        self.assertEqual(user, {"tokenFile": "/var/run/secrets/kubernetes.io/serviceaccount/token"})
+        role = next(x for x in after if x["kind"] == "Role")
+        self.assertEqual(
+            role["rules"],
+            [
+                {
+                    "apiGroups": ["apps"],
+                    "resources": ["deployments"],
+                    "resourceNames": ["pipecat-example"],
+                    "verbs": ["get", "patch"],
+                }
+            ],
+        )
+        config = json.loads(
+            resources[("ConfigMap", "pipecat-channel-config")]["data"]["config.json"]
+        )
+        self.assertEqual([bot["app"] for bot in config["bots"]], ["example"])
+        volumes = controller["spec"]["template"]["spec"]["volumes"]
+        self.assertEqual(
+            [volume["secret"]["secretName"] for volume in volumes if "secret" in volume],
+            [script["secretName"]],
+        )
+        product["bots"][0]["enabled"] = False
+        disabled = self.render("app")
+        self.assertFalse(
+            any(x["metadata"]["name"] == "pipecat-channel-controller" for x in disabled)
+        )
+        del product["bots"][0]["enabled"]
+        del script["channel"]
+        del script["runtimeVersion"]
+        pinned = self.render("app")
+        self.assertFalse(any(x["metadata"]["name"] == "pipecat-channel-controller" for x in pinned))
+        self.assertEqual(pinned, before)
+
     def test_gateway_base_url_propagates_and_restarts_selected_bot(self):
         before = self.render("app")
         url = "https://gateway.example.com/custom/voice/v1"

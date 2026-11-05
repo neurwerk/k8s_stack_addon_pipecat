@@ -1,0 +1,140 @@
+{{- if .Values.pipecat.enabled }}
+{{- $p := .Values.pipecat }}
+{{- $bots := list }}
+{{- range $bot := $p.bots }}
+{{- $script := $bot.script | default dict }}
+{{- if and (or (not (hasKey $bot "enabled")) $bot.enabled) $script.enabled $script.channel }}
+{{- $bots = append $bots $bot }}
+{{- end }}
+{{- end }}
+{{- if $bots }}
+{{- $configs := list }}
+{{- $names := list }}
+{{- range $bot := $bots }}
+{{- $s := $bot.script }}
+{{- $configs = append $configs (dict "app" $bot.id "endpoint" $s.endpoint "bucket" $s.bucket "channel" $s.channel "runtimeVersion" $s.runtimeVersion "accessKeyFile" (printf "/credentials/%s/access" $bot.id) "secretKeyFile" (printf "/credentials/%s/secret" $bot.id)) }}
+{{- $names = append $names (printf "pipecat-%s" $bot.id) }}
+{{- end }}
+{{- $config := dict "intervalSeconds" $p.channels.intervalSeconds "bots" $configs }}
+{{- $kubeconfig := dict "apiVersion" "v1" "kind" "Config" "current-context" "controller" "clusters" (list (dict "name" "cluster" "cluster" (dict "server" "https://kubernetes.default.svc" "certificate-authority" "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"))) "users" (list (dict "name" "controller" "user" (dict "tokenFile" "/var/run/secrets/kubernetes.io/serviceaccount/token"))) "contexts" (list (dict "name" "controller" "context" (dict "cluster" "cluster" "user" "controller"))) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipecat-channel-config
+  namespace: {{ .Release.Namespace }}
+data:
+  config.json: {{ $config | toJson | quote }}
+  kubeconfig.json: {{ $kubeconfig | toJson | quote }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipecat-channel-controller
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipecat-channel-controller
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: {{ $names | toJson }}
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipecat-channel-controller
+  namespace: {{ .Release.Namespace }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pipecat-channel-controller}
+subjects:
+  - {kind: ServiceAccount, name: pipecat-channel-controller, namespace: {{ .Release.Namespace }}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipecat-channel-controller
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: pipecat-channel-controller}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: pipecat-channel-controller}
+      annotations:
+        checksum/config: {{ $config | toJson | sha256sum }}
+        checksum/kubeconfig: {{ $kubeconfig | toJson | sha256sum }}
+    spec:
+      serviceAccountName: pipecat-channel-controller
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: channel-controller
+          image: {{ required "Channel followers require a published channels.image" $p.channels.image | quote }}
+          command: [pipecat-channel-controller]
+          resources: {{ toYaml $p.channels.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          env:
+            - {name: CHANNEL_CONFIG, value: /config/config.json}
+            - {name: KUBECONFIG, value: /config/kubeconfig.json}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            {{- range $bot := $bots }}
+            - {name: reader-{{ $bot.id }}, mountPath: /credentials/{{ $bot.id }}, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: {name: pipecat-channel-config}
+        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}
+        {{- range $bot := $bots }}
+        - name: reader-{{ $bot.id }}
+          secret:
+            secretName: {{ $bot.script.secretName }}
+            items:
+              - {key: {{ $bot.script.accessKeyKey | default "AWS_ACCESS_KEY_ID" }}, path: access}
+              - {key: {{ $bot.script.secretKeyKey | default "AWS_SECRET_ACCESS_KEY" }}, path: secret}
+        {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pipecat-channel-controller
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: pipecat-channel-controller}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to:
+        - ipBlock: {cidr: {{ required "Channel followers require channels.apiServerCIDR" $p.channels.apiServerCIDR | quote }}}
+      ports: [{port: {{ $p.channels.apiServerPort }}, protocol: TCP}]
+    {{- with $p.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

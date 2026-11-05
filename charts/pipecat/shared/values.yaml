@@ -3,7 +3,7 @@ registrationOnly: false
 identityOnly: false
 pipecat:
   enabled: false
-  image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.0@sha256:6ae34fe6a12e03715f553d4065e3cf89cb53fcb8202b1ace659d01cf19cb5878
+  image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.2@sha256:e0e450a1caf6881c6014cb4c43441c183870e7c43bb1514f066958e078b3c4b4
   bots: []
   turn:
     enabled: false

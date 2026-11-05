@@ -53,8 +53,12 @@ def render(values: dict, namespace: str, mode: dict | None = None) -> list[dict]
 def test_shared_parser_and_installable_publication_boundary(capsys):
     assert main([str(ROOT), "--list-packages"]) == 0
     assert "releases/pipecat/secret-sync" in capsys.readouterr().out
-    check(ROOT)
-    check(ROOT, installable=True)
+    addon = check(ROOT)
+    if addon.spec.status == "staged":
+        with pytest.raises(ContractError, match="addon is staged; publication prerequisites"):
+            check(ROOT, installable=True)
+    else:
+        check(ROOT, installable=True)
 
 
 def test_empty_catalog_has_no_credentials_or_disabled_waits():

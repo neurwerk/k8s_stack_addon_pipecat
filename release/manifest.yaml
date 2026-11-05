@@ -3,8 +3,8 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.2.3
-  # Runtime 0.2.1 and tooling 0.2.3 publication and anonymous linux/amd64 pulls verified.
+  version: 0.2.5
+  # Runtime 0.2.2 and tooling 0.2.4 publication and anonymous linux/amd64 pulls verified.
   status: ready
   sourceName: pipecat-addon
   configurationKey: pipecat
@@ -57,10 +57,10 @@ spec:
   artifacts:
     - id: tooling
       role: product
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.2.3@sha256:5351767600380afa3ca928b818d70fa269ec4ef713e615778df5bc0c446055b3
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling:0.2.4@sha256:4556af19e900f2e164d774867d1d03643a24ff95ffe185dd32609118ef85d822
     - id: runtime
       role: native
-      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.1@sha256:9510faa90e22da94735f714c283e97c14b143fe180c2abe93c0e2cc3eb1775ed
+      image: ghcr.io/neurwerk/k8s-stack-addon-pipecat:0.2.2@sha256:e0e450a1caf6881c6014cb4c43441c183870e7c43bb1514f066958e078b3c4b4
     - id: coturn
       role: native
       image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93
@@ -72,6 +72,7 @@ spec:
       image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
   consumers:
     - {artifact: tooling, kind: Command, argv: [pipecat-validate, /work/addon]}
+    - {artifact: tooling, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: channel-controller, optional: true}
     - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: bot, optional: true}
     - {artifact: runtime, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: load-script, location: initContainers, optional: true}
     - {artifact: runtime, package: secret-sync, kind: HelmRelease, namespace: pipecat, name: pipecat-shared, container: configure, location: initContainers, optional: true}

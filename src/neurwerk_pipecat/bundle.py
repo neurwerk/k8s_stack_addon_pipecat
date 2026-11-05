@@ -19,7 +19,9 @@ MAX_EXPANDED = 64 * 1024 * 1024
 MAX_FILES = 128
 
 
-def extract(archive: Path, target: Path, expected_hash: str) -> None:
+def extract(
+    archive: Path, target: Path, expected_hash: str, expected_app: str | None = None
+) -> None:
     if not re.fullmatch(r"[a-f0-9]{64}", expected_hash):
         raise ValueError("Expected exact SHA-256")
     if archive.stat().st_size > MAX_ARCHIVE:
@@ -44,7 +46,7 @@ def extract(archive: Path, target: Path, expected_hash: str) -> None:
             staged = Path(staging) / "verified"
             staged.mkdir()
             extract_tar(raw, staged)
-            validate_manifest(staged)
+            validate_manifest(staged, expected_app)
             # Publish only a fully validated bundle, on the destination filesystem.
             staged.replace(target)
 
@@ -87,7 +89,7 @@ def extract_tar(archive: Path, target: Path) -> None:
     validate_manifest(target)
 
 
-def validate_manifest(target: Path) -> Path:
+def validate_manifest(target: Path, expected_app: str | None = None) -> Path:
     manifest = json.loads((target / "manifest.json").read_text())
     if not isinstance(manifest, dict) or set(manifest) != {
         "id",
@@ -109,6 +111,8 @@ def validate_manifest(target: Path) -> Path:
         r"[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?", manifest["id"]
     ):
         raise ValueError("Invalid app ID")
+    if expected_app is not None and manifest["id"] != expected_app:
+        raise ValueError("Bundle app identity mismatch")
     files = manifest["files"]
     actual = {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()}
     if (
@@ -140,9 +144,54 @@ def validate_requirements(text: str) -> None:
             raise ValueError("Dependencies require exact versions and SHA-256 hashes")
 
 
+def bundle_reference(endpoint: str, bucket: str) -> tuple[str, str]:
+    """Resolve only this app's configured channel; bootstrap pins cover first installation."""
+    bootstrap = (os.environ["S3_KEY"], os.environ["BUNDLE_SHA256"])
+    channel = os.environ.get("BUNDLE_CHANNEL")
+    if channel and os.environ.get("BUNDLE_RUNTIME_VERSION") != __version__:
+        raise ValueError("Incompatible channel runtime contract")
+    raw = os.environ.get("BUNDLE_CHANNEL_RELEASE", "")
+    if not channel or not raw:
+        return bootstrap
+    if len(raw) > 8192:
+        raise ValueError("Channel release is too large")
+    value = json.loads(raw)
+    if not isinstance(value, dict) or set(value) != {
+        "app",
+        "endpoint",
+        "bucket",
+        "channel",
+        "runtimeVersion",
+        "key",
+        "sha256",
+    }:
+        raise ValueError("Invalid channel release")
+    policy = {
+        "app": os.environ["BUNDLE_APP_ID"],
+        "endpoint": endpoint,
+        "bucket": bucket,
+        "channel": channel,
+        "runtimeVersion": __version__,
+    }
+    if any(value[key] != expected for key, expected in policy.items()):
+        return (
+            bootstrap  # An annotation from a previous source policy is not a release for this one.
+        )
+    digest = value["sha256"]
+    if (
+        not isinstance(digest, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", digest)
+        or value["key"] != f"pipecat/{policy['app']}/{digest}.tar.gz"
+    ):
+        raise ValueError("Invalid channel bundle reference")
+    return value["key"], digest
+
+
 def load_bundle() -> None:
     target = Path(os.environ.get("BUNDLE_TARGET", "/scripts/bundle"))
     endpoint = os.environ["S3_ENDPOINT"]
+    bucket = os.environ["S3_BUCKET"]
+    key, digest = bundle_reference(endpoint, bucket)
     if not endpoint.startswith(("https://", "http://")):
         raise ValueError("Invalid S3 endpoint")
     client = boto3.client(
@@ -156,7 +205,7 @@ def load_bundle() -> None:
             s3={"addressing_style": "path"},
         ),
     )
-    result = client.get_object(Bucket=os.environ["S3_BUCKET"], Key=os.environ["S3_KEY"])
+    result = client.get_object(Bucket=bucket, Key=key)
     try:
         if result["ContentLength"] > MAX_ARCHIVE:
             raise ValueError("Archive too large")
@@ -169,7 +218,7 @@ def load_bundle() -> None:
                     if size > MAX_ARCHIVE:
                         raise ValueError("Archive too large")
                     output.write(chunk)
-            extract(path, target, os.environ["BUNDLE_SHA256"])
+            extract(path, target, digest, os.environ.get("BUNDLE_APP_ID"))
     finally:
         result["Body"].close()
         client.close()
