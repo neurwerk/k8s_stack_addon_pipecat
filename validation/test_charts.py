@@ -148,6 +148,35 @@ class DeploymentBehaviorTests(unittest.TestCase):
             if x["kind"] == "Deployment" and x["metadata"]["name"] == "pipecat-channel-controller"
         )
         self.assertTrue(controller["spec"]["template"]["spec"]["automountServiceAccountToken"])
+        container = controller["spec"]["template"]["spec"]["containers"][0]
+        kube_path = next(e["value"] for e in container["env"] if e["name"] == "KUBECONFIG")
+        mount = next(
+            m for m in container["volumeMounts"] if Path(kube_path).parent == Path(m["mountPath"])
+        )
+        volume = next(
+            v
+            for v in controller["spec"]["template"]["spec"]["volumes"]
+            if v["name"] == mount["name"]
+        )
+        data = resources[("ConfigMap", volume["configMap"]["name"])]["data"]
+        kubeconfig = json.loads(data[Path(kube_path).name])
+        context = next(
+            c["context"]
+            for c in kubeconfig["contexts"]
+            if c["name"] == kubeconfig["current-context"]
+        )
+        cluster = next(
+            c["cluster"] for c in kubeconfig["clusters"] if c["name"] == context["cluster"]
+        )
+        user = next(u["user"] for u in kubeconfig["users"] if u["name"] == context["user"])
+        self.assertEqual(
+            cluster,
+            {
+                "server": "https://kubernetes.default.svc",
+                "certificate-authority": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+            },
+        )
+        self.assertEqual(user, {"tokenFile": "/var/run/secrets/kubernetes.io/serviceaccount/token"})
         role = next(x for x in after if x["kind"] == "Role")
         self.assertEqual(
             role["rules"],
