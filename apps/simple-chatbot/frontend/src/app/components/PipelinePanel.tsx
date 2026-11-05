@@ -143,7 +143,7 @@ export function ModelLocations({ activity }: { activity?: PipelineActivity }) {
             </tr>;
           })}</tbody>
         </table>
-        <p className="mt-3 text-xs text-muted-foreground">Routes do not prove the inference provider or its hardware. Hardware is shown only when reported by runtime health; checks repeat every minute. Activity describes app-observed work, not GPU utilization.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Routes do not prove the inference provider or its hardware. Local compute reflects loaded ONNX session providers; remote hardware is shown only when reported by runtime health, checked every minute. Activity describes app-observed work, not GPU utilization.</p>
       </div> : <p className="mt-3 text-sm text-muted-foreground">Start a conversation to see model placement.</p>}
     </details>
   );

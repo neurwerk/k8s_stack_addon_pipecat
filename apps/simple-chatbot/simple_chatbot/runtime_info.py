@@ -32,6 +32,28 @@ def hosting(host: str) -> str:
     return "Remote endpoint"
 
 
+def onnx_session_metadata(providers: list[str]) -> dict[str, str]:
+    """Describe providers attached to a loaded model, not globally available devices."""
+    gpu_providers = {
+        "CUDAExecutionProvider",
+        "ROCMExecutionProvider",
+        "TensorrtExecutionProvider",
+        "CoreMLExecutionProvider",
+        "DmlExecutionProvider",
+        "MIGraphXExecutionProvider",
+    }
+    compute = "Unknown"
+    if providers == ["CPUExecutionProvider"]:
+        compute = "CPU"
+    elif any(provider in gpu_providers for provider in providers):
+        # A session can still run some operations on the CPU fallback provider.
+        compute = "GPU-capable"
+    return {
+        "compute": compute,
+        "evidence": "ONNX session providers: " + ", ".join(providers)[:210],
+    }
+
+
 def configured_models(settings: Settings) -> dict[str, dict]:
     location = "Our Kubernetes" if os.environ.get("KUBERNETES_SERVICE_HOST") else "App host"
     host = os.environ.get("NODE_NAME") or socket.gethostname()
@@ -113,8 +135,11 @@ async def health_metadata(http: httpx.AsyncClient, endpoint: str) -> dict:
     return {}
 
 
-async def refresh_models(activity: Activity, settings: Settings) -> None:
+async def refresh_models(
+    activity: Activity, settings: Settings, local_models: dict[str, dict]
+) -> None:
     baseline = configured_models(settings)
+    baseline.update(local_models)
     activity.models = {key: dict(value) for key, value in baseline.items()}
     endpoints = {
         stage: speech.base_url

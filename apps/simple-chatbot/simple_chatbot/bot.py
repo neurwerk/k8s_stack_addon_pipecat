@@ -35,7 +35,7 @@ from pipecat.workers.runner import WorkerRunner
 from simple_chatbot.activity import Activity, ActivityObserver, ObservedSmartTurn
 from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.diarization import DiarizationSession
-from simple_chatbot.runtime_info import configured_models, refresh_models
+from simple_chatbot.runtime_info import configured_models, onnx_session_metadata, refresh_models
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
 from simple_chatbot.timings import TurnTimings
 from simple_chatbot.websocket import BrowserSerializer
@@ -97,12 +97,25 @@ async def run_bot(
             }
         ]
     )
+    vad_analyzer = SileroVADAnalyzer()
+    turn_analyzer = ObservedSmartTurn(activity)
+    local_models = {
+        "vad": {
+            **activity.models["vad"],
+            **onnx_session_metadata(vad_analyzer._model.session.get_providers()),
+        },
+        "turn": {
+            **activity.models["turn"],
+            **onnx_session_metadata(turn_analyzer._session.get_providers()),
+        },
+    }
+    activity.models.update(local_models)
     user, assistant = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=vad_analyzer,
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=ObservedSmartTurn(activity))]
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer)]
             ),
         ),
     )
@@ -172,7 +185,7 @@ async def run_bot(
         activity_tasks.extend(
             [
                 asyncio.create_task(activity.publish(send_timing)),
-                asyncio.create_task(refresh_models(activity, settings)),
+                asyncio.create_task(refresh_models(activity, settings, local_models)),
             ]
         )
         await worker.queue_frames([LLMRunFrame()])
