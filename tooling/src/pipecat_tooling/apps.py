@@ -626,7 +626,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if bundle:
-            existing = values.bot.get("script", {})
             secret = existing.get("secretName") or args.secret_name
             if args.secret_name and existing.get("secretName") not in {None, args.secret_name}:
                 raise AppError(

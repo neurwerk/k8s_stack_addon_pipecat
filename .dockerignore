@@ -1,4 +1,5 @@
 .git
+.worktrees
 .venv
 **/.venv
 **/__pycache__

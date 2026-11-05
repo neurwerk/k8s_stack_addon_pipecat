@@ -128,7 +128,6 @@ def reconcile(configs: list[dict], kube: Kubernetes, client_factory=connect) -> 
                     "ready" if rollout_ready(deployment, selected) else "awaiting-rollout"
                 )
         except (
-            AppError,
             BotoCoreError,
             ClientError,
             OSError,

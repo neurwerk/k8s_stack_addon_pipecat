@@ -1,4 +1,4 @@
-"""Reviewed timing boundaries use synthetic media and a manually advanced clock."""
+"""Timing boundaries use synthetic media and a manually advanced clock."""
 
 import asyncio
 import io

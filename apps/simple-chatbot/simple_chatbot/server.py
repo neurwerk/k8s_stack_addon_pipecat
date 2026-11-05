@@ -352,8 +352,6 @@ def create_app(settings: Settings) -> FastAPI:
                             )
                     except TimeoutError:
                         pass
-                    except asyncio.CancelledError:
-                        raise
                     except Exception:
                         logger.error("Bot session failed; payload omitted")
                     finally:

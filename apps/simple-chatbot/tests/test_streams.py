@@ -1,4 +1,4 @@
-"""Reviewed streaming and real pinned WebRTC boundary regressions, without service calls."""
+"""Streaming and real pinned WebRTC boundary regressions, without service calls."""
 
 import asyncio
 import json

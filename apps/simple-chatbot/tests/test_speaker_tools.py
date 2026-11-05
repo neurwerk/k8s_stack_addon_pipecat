@@ -1,4 +1,4 @@
-"""Reviewed speaker mutations and streamed speech boundaries, without service calls."""
+"""Speaker mutations and streamed speech boundaries, without service calls."""
 
 import asyncio
 import json
