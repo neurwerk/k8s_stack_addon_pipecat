@@ -1,6 +1,5 @@
 {{- if .Values.pipecat.enabled }}
 {{- $p := .Values.pipecat }}
-{{- $oidcEnabled := true }}
 {{- if and (hasKey $p.oidc "enabled") (not $p.oidc.enabled) }}{{ fail "All bots require OIDC integration; anonymous only controls application access" }}{{ end }}
 {{- $ids := dict }}
 {{- $slugs := dict }}
@@ -36,10 +35,8 @@
 {{- else }}
 {{- if $bot.gatewaySecretRef }}{{ fail "Protected bots forbid gatewaySecretRef" }}{{ end }}
 {{- end }}
-{{- if $oidcEnabled }}
 {{- $_ := set $credentials "oidc" (dict "name" $p.oidc.secretName "key" $p.oidc.secretKey) }}
 {{- $_ := set $config "oidc" (dict "issuer" (required "OIDC issuer is required" $p.oidc.issuer) "client_id" $p.oidc.clientId "client_secret" (dict "file" "/credentials/oidc/value")) }}
-{{- end }}
 {{- range $kind := list "stt" "tts" }}
 {{- $speech := get $bot $kind }}
 {{- if $speech }}
@@ -120,7 +117,6 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         seccompProfile: {type: RuntimeDefault}
-      {{- if $script.enabled }}
       initContainers:
         - name: load-script
           image: {{ $image | quote }}
@@ -154,19 +150,11 @@ spec:
           volumeMounts:
             - {name: scripts, mountPath: /scripts}
             - {name: tmp, mountPath: /tmp}
-      {{- end }}
       containers:
         - name: bot
           image: {{ $image | quote }}
           imagePullPolicy: IfNotPresent
-          {{- if $script.enabled }}
           securityContext: *security
-          {{- else }}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: {drop: [ALL]}
-          {{- end }}
           resources: {{ toYaml $p.resources | nindent 12 }}
           env:
             - {name: PIPECAT_CONFIG, value: /config/config.json}
@@ -187,9 +175,7 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /config, readOnly: true}
             - {name: tmp, mountPath: /tmp}
-            {{- if $script.enabled }}
             - {name: scripts, mountPath: /scripts, readOnly: true}
-            {{- end }}
             {{- range $kind, $ref := $credentials }}
             - {name: {{ $kind }}, mountPath: /credentials/{{ $kind }}, readOnly: true}
             {{- end }}
@@ -197,9 +183,7 @@ spec:
         - name: config
           configMap: {name: {{ $name }}}
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 256Mi}}
-        {{- if $script.enabled }}
         - {name: scripts, emptyDir: {sizeLimit: 64Mi}}
-        {{- end }}
         {{- range $kind, $ref := $credentials }}
         - name: {{ $kind }}
           secret:

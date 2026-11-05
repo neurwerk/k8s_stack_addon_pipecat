@@ -1,4 +1,4 @@
-"""Astra-reviewed boundaries; all endpoints, identities and media are synthetic."""
+"""Boundaries; all endpoints, identities and media are synthetic."""
 
 import asyncio
 import base64

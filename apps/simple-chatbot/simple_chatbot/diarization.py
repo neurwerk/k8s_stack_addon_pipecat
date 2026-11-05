@@ -423,8 +423,6 @@ class DiarizationSession:
                 if operation.future and not operation.future.done():
                     operation.future.set_result(result)
                 operation = None
-        except asyncio.CancelledError:
-            raise
         except Exception:
             self.failed = True
             self.profiles.clear()

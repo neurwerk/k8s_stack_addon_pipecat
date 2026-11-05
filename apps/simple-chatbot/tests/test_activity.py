@@ -1,4 +1,4 @@
-"""Reviewed call isolation, observable concurrency and metadata boundaries."""
+"""Call isolation, observable concurrency and metadata boundaries."""
 
 import asyncio
 import json

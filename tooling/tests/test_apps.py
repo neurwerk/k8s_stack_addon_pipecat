@@ -145,10 +145,10 @@ def test_real_python_and_yaml_credential_values_still_rejected(source, name, con
 )
 def test_unsafe_allowlist_rejected(source: Path, name: str):
     config = source / "assistant/app.yaml"
-    config.write_text(
-        yaml.safe_dump({"id": "assistant", "runtimeVersion": "0.2.0", "files": ["bot.py", name]})
-    )
-    with pytest.raises(apps.AppError):
+    manifest = yaml.safe_load(config.read_text())
+    manifest["files"] = ["bot.py", name]
+    config.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(apps.AppError, match="Unsafe or credential-like bundle path"):
         apps.package(source, "assistant")
 
 

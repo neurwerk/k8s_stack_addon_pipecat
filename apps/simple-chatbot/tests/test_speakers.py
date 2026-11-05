@@ -1,4 +1,4 @@
-"""Reviewed speaker isolation, timeline and reconnection boundaries; synthetic audio only."""
+"""Speaker isolation, timeline and reconnection boundaries; synthetic audio only."""
 
 import asyncio
 import io
