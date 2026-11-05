@@ -21,6 +21,10 @@ pipecat:
     # Add pipecat to the platform Reloader watch and RBAC namespace lists so
     # certificate renewal and shared-secret rotation restart the TURN process.
     nodeSelector: {}
+    # Resource budget for the TURN configuration init container.
+    configureResources:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 128Mi}
     resources:
       requests: {cpu: 100m, memory: 128Mi}
       limits: {cpu: "1", memory: 512Mi}
