@@ -4,6 +4,7 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 import {
   PipecatClientProvider,
   usePipecatClientTransportState,
+  usePipecatClientMicControl,
 } from "@pipecat-ai/client-react";
 import {
   SmallWebRTCTransport,
@@ -16,6 +17,8 @@ import { ConnectButtonView } from "@/components/pipecat/connect-button";
 import { Button } from "@/components/ui/button";
 import { ConversationPanel } from "@/app/components/ConversationPanel";
 import { TimingPanel } from "@/app/components/TimingPanel";
+import { ActivityTimeline, ModelLocations, PipelinePanel } from "@/app/components/PipelinePanel";
+import type { PipelineActivity } from "./activity";
 import { version } from "../package.json";
 import type { TurnTiming } from "./timings";
 import { initializeSession, type ChatError } from "./session";
@@ -39,6 +42,7 @@ function App() {
   const [speaking, setSpeaking] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
   const [errors, setErrors] = useState<ChatError[]>([]);
+  const [activity, setActivity] = useState<PipelineActivity>();
   // No device initialization before an explicit Start click and admission check.
   const [client, setClient] = useState(
     () =>
@@ -50,7 +54,7 @@ function App() {
         enableCam: false,
       }),
   );
-  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors), []);
+  useEffect(() => initializeSession(setClient, setModel, setTimings, setSpeaking, setNotices, setErrors, setActivity), []);
 
   return (
     <PipecatClientProvider client={client}>
@@ -154,13 +158,21 @@ function App() {
           <audio id="audio" hidden />
         </section>
         <ConversationPanel model={model} notices={notices} errors={errors} className="min-h-96 flex-1" />
+        <LivePipeline activity={activity} />
         <TimingPanel timings={timings} speaking={speaking} />
+        <ActivityTimeline activity={activity} />
+        <ModelLocations activity={activity} />
         <footer className="text-center text-xs text-muted-foreground">
           Demo Assistant v{version} · Built with Pipecat and Pipecat UI
         </footer>
       </main>
     </PipecatClientProvider>
   );
+}
+
+function LivePipeline({ activity }: { activity?: PipelineActivity }) {
+  const { isMicEnabled } = usePipecatClientMicControl();
+  return <PipelinePanel activity={activity} micEnabled={isMicEnabled} />;
 }
 
 const root = document.getElementById("root");

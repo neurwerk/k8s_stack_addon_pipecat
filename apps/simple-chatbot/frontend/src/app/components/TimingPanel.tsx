@@ -16,13 +16,11 @@ export function TimingPanel({
   speaking: boolean;
 }) {
   return (
-    <section aria-labelledby="timings-heading" className="rounded-xl border bg-card p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="timings-heading" className="font-medium">Response timings</h2>
-        <p className="text-xs text-muted-foreground">
+    <details className="rounded-xl border bg-card p-5">
+      <summary className="cursor-pointer font-medium">Response timings</summary>
+      <p className="mt-2 text-xs text-muted-foreground">
           Speaking signal: {speaking ? "active" : "inactive"} (server output, not speaker playback)
-        </p>
-      </div>
+      </p>
       {timings.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">Timings appear when a conversation starts.</p>
       ) : (
@@ -35,6 +33,8 @@ export function TimingPanel({
                 <th scope="col" className="p-2">STT request</th>
                 <th scope="col" className="p-2">STT words/s</th>
                 <th scope="col" className="p-2">STT audio s/s</th>
+                <th scope="col" className="p-2">Speaker finalization</th>
+                <th scope="col" className="p-2">Speaker wait</th>
                 <th scope="col" className="p-2">LLM first text</th>
                 <th scope="col" className="p-2">Text buffering</th>
                 <th scope="col" className="p-2">TTS first audio</th>
@@ -51,6 +51,8 @@ export function TimingPanel({
                   <td className="whitespace-nowrap p-2">{duration(timing.stt_ms)}</td>
                   <td className="p-2">{rate(timing.words, timing.stt_ms)}</td>
                   <td className="p-2">{rate(timing.audio_seconds, timing.stt_ms)}</td>
+                  <td className="whitespace-nowrap p-2">{duration(timing.diarization_finalize_ms)}</td>
+                  <td className="whitespace-nowrap p-2">{duration(timing.diarization_wait_ms)}</td>
                   <td className="whitespace-nowrap p-2">{duration(timing.llm_first_text_ms)}</td>
                   <td className="whitespace-nowrap p-2">{duration(timing.text_buffer_ms)}</td>
                   <td className="whitespace-nowrap p-2">{duration(timing.tts_first_audio_ms)}</td>
@@ -66,11 +68,15 @@ export function TimingPanel({
         <p className="mt-2">
         STT includes the transcription request and response; words are counted by whitespace.
         Audio s/s above 1 means faster than real time, including segment padding.
+        Speaker finalization measures the end-of-segment flush request to finalized speaker results,
+        including queued audio and network time; it overlaps STT and is not total model compute time.
+        Speaker wait is only the extra wait after transcription, zero when results are already ready.
+        STT and speaker measurements are summed across segments in each reply; missing measurements show a dash.
         LLM measures request to first usable text. Text buffering measures first text to the first speech request.
         TTS measures that request to first valid PCM audio. Text → audio includes buffering and TTS;
         it is not an extra stage. Network time is included; end-of-speech detection and browser playback are not.
         </p>
       </details>
-    </section>
+    </details>
   );
 }

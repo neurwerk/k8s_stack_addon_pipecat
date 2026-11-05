@@ -8,6 +8,7 @@ import {
   WavMediaManager,
 } from "@pipecat-ai/small-webrtc-transport";
 import { parseTiming, type TurnTiming } from "./timings";
+import { endActivity, parseActivity, type PipelineActivity } from "./activity";
 
 export interface ChatError {
   text: string;
@@ -99,6 +100,7 @@ export function initializeSession(
   onSpeaking: (speaking: boolean) => void,
   onNotices: (notices: string[]) => void,
   onErrors: (errors: ChatError[]) => void,
+  onActivity: (activity: PipelineActivity | undefined) => void,
 ): () => void {
   const status = element("status", HTMLParagraphElement);
   const callError = element("call-error", HTMLParagraphElement);
@@ -131,6 +133,7 @@ export function initializeSession(
     timings: TurnTiming[];
     notices: string[];
     errors: ChatError[];
+    activity?: PipelineActivity;
     pollingNotices?: boolean;
   }
   class Cancelled extends Error {}
@@ -181,6 +184,7 @@ export function initializeSession(
     if (attempt.polling) clearInterval(attempt.polling);
     if (active === attempt) {
       onSpeaking(false);
+      onActivity(endActivity(attempt.activity));
       attempt.timings = attempt.timings.map((timing) =>
         ["complete", "no-audio", "failed", "interrupted"].includes(timing.status)
           ? timing
@@ -250,6 +254,14 @@ export function initializeSession(
     return {
       onServerMessage: (data: unknown) => {
         if (!current()) return;
+        const activity = parseActivity(data);
+        if (activity) {
+          if (!attempt.activity || activity.at_ms >= attempt.activity.at_ms) {
+            attempt.activity = activity;
+            onActivity(activity);
+          }
+          return;
+        }
         const timing = parseTiming(data);
         if (!timing) return;
         attempt.timings = [
@@ -442,6 +454,7 @@ export function initializeSession(
     active = attempt;
     enableAudio.hidden = true;
     onTimings([]);
+    onActivity(undefined);
     onNotices([]);
     onErrors([]);
     onSpeaking(false);
@@ -473,6 +486,8 @@ export function initializeSession(
         if (attempt.mediaConnected || attempt.serviceError || !network)
           throw error;
         await disconnectOwn(attempt);
+        attempt.activity = undefined;
+        onActivity(undefined);
         check(attempt);
         attempt.serverCancel = mutation("/api/cancel");
         const cancelled = await attempt.serverCancel;

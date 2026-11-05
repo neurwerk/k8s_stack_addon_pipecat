@@ -5,12 +5,13 @@
 
 """App-owned voice pipeline: independent context and processors per connection."""
 
+import asyncio
+import contextlib
 from collections.abc import Callable
 
 import httpx
 from fastapi import WebSocket
 from loguru import logger
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -31,8 +32,10 @@ from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
+from simple_chatbot.activity import Activity, ActivityObserver, ObservedSmartTurn
 from simple_chatbot.config import ConversationOptions, Settings
 from simple_chatbot.diarization import DiarizationSession
+from simple_chatbot.runtime_info import configured_models, refresh_models
 from simple_chatbot.services import HTTPSTT, HTTPTTS, GatewayLLM
 from simple_chatbot.timings import TurnTimings
 from simple_chatbot.websocket import BrowserSerializer
@@ -48,8 +51,14 @@ async def run_bot(
     diarization: DiarizationSession | None = None,
 ) -> None:
     assert settings.stt and settings.tts
+    activity = Activity()
+    activity.models = configured_models(settings)
     if diarization:
         await diarization.attach()
+        diarization.activity = activity
+    else:
+        activity.set("diarization", "off", "Not configured")
+        activity.set("attribution", "off", "Not configured")
     transport: BaseTransport
     if isinstance(connection, WebSocket):
         transport = FastAPIWebsocketTransport(
@@ -93,7 +102,7 @@ async def run_bot(
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=ObservedSmartTurn(activity))]
             ),
         ),
     )
@@ -101,7 +110,7 @@ async def run_bot(
     async def send_timing(data: dict) -> None:
         await worker.rtvi.send_server_message(data)
 
-    timings = TurnTimings(send_timing)
+    timings = TurnTimings(send_timing, activity)
     pipeline = Pipeline(
         [
             transport.input(),
@@ -117,7 +126,7 @@ async def run_bot(
                 profiles=diarization.profiles if diarization else None,
                 forget_speakers=diarization.reset if diarization else None,
             ),
-            HTTPTTS(settings.tts, http),
+            HTTPTTS(settings.tts, http, activity),
             transport.output(),
             assistant,
         ]
@@ -132,10 +141,18 @@ async def run_bot(
         ),
         idle_timeout_secs=settings.idle_seconds,
         processor_unusable_policy=ProcessorUnusablePolicy.CANCEL,
+        observers=[ActivityObserver(activity)],
     )
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
     greeted = False
+    activity_tasks: list[asyncio.Task] = []
+
+    @user.event_handler("on_user_turn_stopped")
+    async def on_turn_stopped(aggregator, strategy, message):
+        activity.turn_complete = True
+        activity.set("turn", "complete", "Turn ended" if strategy else "Turn timeout")
+        activity.gate()
 
     @worker.event_handler("on_pipeline_error")
     async def on_pipeline_error(worker, frame):
@@ -152,6 +169,12 @@ async def run_bot(
         if greeted:
             return
         greeted = True
+        activity_tasks.extend(
+            [
+                asyncio.create_task(activity.publish(send_timing)),
+                asyncio.create_task(refresh_models(activity, settings)),
+            ]
+        )
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
@@ -162,3 +185,11 @@ async def run_bot(
         await runner.run()
     finally:
         await runner.cancel()
+        activity.close()
+        for task in activity_tasks:
+            task.cancel()
+        for task in activity_tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if diarization:
+            diarization.activity = None

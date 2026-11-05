@@ -9,6 +9,7 @@ import time
 import unittest
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -26,6 +27,8 @@ from pipecat.workers.runner import WorkerRunner
 from test_security import FakeConnection, settings
 from websockets.asyncio.server import serve
 
+from simple_chatbot.activity import Activity as CallActivity
+from simple_chatbot.activity import ActivityObserver
 from simple_chatbot.config import Diarization
 from simple_chatbot.diarization import (
     Activity,
@@ -37,6 +40,7 @@ from simple_chatbot.server import create_app
 from simple_chatbot.services import HTTPSTT
 from simple_chatbot.speaker_transcripts import attribute_transcript
 from simple_chatbot.speakers import SpeakerProfiles
+from simple_chatbot.timings import TurnTimings
 
 
 class AttributionTests(unittest.TestCase):
@@ -263,8 +267,31 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
     async def test_lost_flush_reply_replays_results_without_losing_overlap(self):
         self.drop_flush = True
         await self.client.attach()
+        activity = CallActivity()
+        self.client.activity = activity
+        self.audio_release.clear()
         self.client.feed(bytes(640))
-        span = await self.client.flush(0)
+        await asyncio.wait_for(self.audio_received.wait(), 1)
+        now = 10.0
+        clock = SimpleNamespace(monotonic=lambda: now)
+        connect = self.client._connect
+
+        async def reconnect():
+            nonlocal now
+            now += 0.5
+            await connect()
+
+        with (
+            patch("simple_chatbot.diarization.time", clock),
+            patch.object(self.client, "_connect", side_effect=reconnect),
+        ):
+            flushing = self.client.flush(0)
+            self.assertEqual(activity.states["diarization"]["status"], "active")
+            now += 2
+            self.audio_release.set()
+            span = await asyncio.wait_for(flushing, 3)
+        self.assertEqual(span.finalization_seconds, 2.5)
+        self.assertFalse(activity.operations["diarization"])
         self.assertEqual({a.speaker for a in span.activities}, {"speaker_0", "speaker_1"})
         self.assertIsNone(span.speaker(0, 320))
         self.assertEqual(self.client.sequence, 2)
@@ -335,7 +362,10 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
 
         await self.client.attach()
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
-            stt = HTTPSTT(settings(self.key).stt, http, diarization=self.client)
+            activity = CallActivity()
+            self.client.activity = activity
+            timings = TurnTimings(AsyncMock(), activity)
+            stt = HTTPSTT(settings(self.key).stt, http, timings, diarization=self.client)
             collector = Collector()
             worker = PipelineWorker(
                 Pipeline([stt, collector]),
@@ -343,6 +373,7 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
                 enable_rtvi=False,
                 enable_turn_tracking=False,
                 idle_timeout_secs=None,
+                observers=[ActivityObserver(activity)],
             )
             runner = WorkerRunner(handle_sigint=False)
             await runner.add_workers(worker)
@@ -363,6 +394,9 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
                         f"0:speaker_{index}",
                     )
                     self.assertTrue(frame.finalized)
+                    self.assertEqual(activity.states["attribution"]["status"], "complete")
+                    self.assertTrue(activity.transcript_ready)
+                    self.assertIn("diarization_finalize_ms", timings.pending.values)
                 await worker.queue_frame(EndFrame())
                 await asyncio.wait_for(running, 3)
             finally:

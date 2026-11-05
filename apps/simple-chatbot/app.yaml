@@ -11,6 +11,8 @@ files:
 - SHADCN-LICENSE
 - upstream.json
 - simple_chatbot/__init__.py
+- simple_chatbot/activity.py
+- simple_chatbot/runtime_info.py
 - simple_chatbot/auth.py
 - simple_chatbot/config.py
 - simple_chatbot/diarization.py
