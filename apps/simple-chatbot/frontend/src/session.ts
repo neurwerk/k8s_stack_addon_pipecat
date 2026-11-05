@@ -99,14 +99,20 @@ function websocketAudioManager(isPaused: () => boolean) {
     }
     if (interrupting) return interrupting;
     playback++;
+    const retiringStream = player.stream;
     interrupting = (async () => {
       try {
         await interrupt();
       } finally {
         // The pinned player does not expose a reset method. Its worklet sends
         // "stop" asynchronously; detach it before feeding the next reply.
-        player.stream?.disconnect();
-        player.stream = null;
+        // Its delayed "stop" handler otherwise clears the next stream too.
+        if (retiringStream) {
+          retiringStream.port.onmessage = null;
+          retiringStream.port.close();
+          retiringStream.disconnect();
+        }
+        if (player.stream === retiringStream) player.stream = null;
         routed = null;
         const queued = pending;
         pending = [];
