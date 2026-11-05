@@ -296,8 +296,8 @@ class GatewayLLM(FrameProcessor):
             return {"ok": False, "reason": "Invalid tool arguments."}
         if not isinstance(arguments, dict):
             return {"ok": False, "reason": "Invalid tool arguments."}
-        if tool.name == "remember_speaker" and set(arguments) == {"name"}:
-            return profiles.register(arguments["name"], turn, generation)
+        if tool.name == "remember_speaker" and set(arguments) == {"name", "quote"}:
+            return profiles.register(arguments["name"], arguments["quote"], turn, generation)
         if tool.name == "forget_speakers" and not arguments:
             if self.forget_speakers is None:
                 return {"ok": False, "reason": "Forgetting speaker profiles is unavailable."}

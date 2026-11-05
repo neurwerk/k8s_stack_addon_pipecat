@@ -40,6 +40,83 @@ from simple_chatbot.speakers import SpeakerProfiles
 
 
 class AttributionTests(unittest.TestCase):
+    def test_invalid_word_does_not_discard_valid_words_or_text(self):
+        profiles = SpeakerProfiles()
+        span = SpeakerSpan(0, 32000, 0, (Activity(0, 32000, "speaker_0"),))
+        text, _ = attribute_transcript(
+            {
+                "text": "Ich heiße Alex",
+                "words": [
+                    {"word": "Ich", "start": 0, "end": 0.4},
+                    {"word": "heiße", "start": 0.4, "end": 0.4},
+                    {"word": "Alex", "start": 0.8, "end": 1.4},
+                ],
+            },
+            span,
+            profiles,
+        )
+        self.assertEqual(
+            json.loads(text)["speaker_turn"],
+            [
+                {"speaker": "0:speaker_0", "name": "", "text": "Ich"},
+                {"speaker": "Unknown", "name": "", "text": "heiße"},
+                {"speaker": "0:speaker_0", "name": "", "text": "Alex"},
+            ],
+        )
+        self.assertTrue(
+            profiles.register("Alex", "Ich heiße Alex", profiles.turn, profiles.generation)["ok"]
+        )
+
+    def test_silence_in_word_timestamp_does_not_mask_speech_or_accept_tiny_sliver(self):
+        span = SpeakerSpan(0, 32000, 0, (Activity(16000, 32000, "speaker_0"),))
+        self.assertEqual(span.speaker(round(0.59 * 16000), round(1.19 * 16000)), "speaker_0")
+        self.assertIsNone(span.speaker(round(0.59 * 16000), round(1.01 * 16000)))
+        conflict = SpeakerSpan(
+            0,
+            32000,
+            0,
+            (Activity(16000, 32000, "speaker_0"), Activity(17600, 17760, "speaker_1")),
+        )
+        self.assertIsNone(conflict.speaker(round(0.59 * 16000), round(1.19 * 16000)))
+
+    def test_registration_requires_name_words_and_one_speaker_in_introduction(self):
+        profiles = SpeakerProfiles()
+        profiles.observe(
+            [
+                (None, "Äh"),
+                ("speaker_0", "ich"),
+                ("speaker_0", "bin"),
+                ("speaker_0", "Alex"),
+                ("speaker_1", "Hallo"),
+            ],
+            [None, "speaker_0", "speaker_0", "speaker_0", "speaker_1"],
+        )
+        turn, generation = profiles.begin_response()
+        self.assertTrue(profiles.register("Alex", "ich bin Alex", turn, generation)["ok"])
+        self.assertEqual(profiles.names, {"speaker_0": "Alex"})
+        profiles.clear()
+        profiles.observe([("speaker_0", "ich"), ("speaker_0", "bin"), (None, "Alex")])
+        self.assertFalse(
+            profiles.register("Alex", "ich bin Alex", profiles.turn, profiles.generation)["ok"]
+        )
+        profiles.clear()
+        profiles.observe(
+            [("speaker_0", "ich"), ("speaker_0", "bin"), ("speaker_1", "Alex")],
+            ["speaker_0", "speaker_0", "speaker_1"],
+        )
+        self.assertFalse(
+            profiles.register("Alex", "ich bin Alex", profiles.turn, profiles.generation)["ok"]
+        )
+        self.assertEqual(profiles.names, {})
+        profiles.clear()
+        profiles.observe(
+            [("speaker_0", "ich"), ("speaker_0", "bin"), ("speaker_0", "Alex")],
+            ["speaker_0", "speaker_0", None],
+        )
+        self.assertFalse(
+            profiles.register("Alex", "ich bin Alex", profiles.turn, profiles.generation)["ok"]
+        )
+
     def test_word_alignment_splits_turn_and_does_not_enroll_overlap(self):
         profiles = SpeakerProfiles(names={"speaker_0": "Alex"})
         span = SpeakerSpan(
@@ -65,7 +142,9 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual([p["speaker"] for p in parts], ["0:speaker_0", "0:speaker_1", "Unknown"])
         self.assertEqual(parts[0]["name"], "Alex")
         self.assertEqual(speaker, "")
-        self.assertFalse(profiles.register("Bea", profiles.turn, profiles.generation)["ok"])
+        self.assertFalse(
+            profiles.register("Bea", "I am Bea", profiles.turn, profiles.generation)["ok"]
+        )
 
     def test_invalid_or_missing_timestamps_preserve_text_without_guessing(self):
         span = SpeakerSpan(0, 16000, 0, (Activity(0, 16000, "speaker_0"),))
@@ -83,14 +162,24 @@ class AttributionTests(unittest.TestCase):
 
     def test_forget_and_stale_turn_cannot_attach_old_name_to_new_voice(self):
         profiles = SpeakerProfiles()
-        profiles.observe(["speaker_0"])
+        profiles.observe(
+            [
+                ("speaker_0", "My"),
+                ("speaker_0", "name"),
+                ("speaker_0", "is"),
+                ("speaker_0", "Alex"),
+            ],
+            ["speaker_0"] * 4,
+        )
         generation, turn = profiles.generation, profiles.turn
-        self.assertTrue(profiles.register("Alex", turn, generation)["ok"])
-        profiles.observe(["speaker_1"])
-        self.assertFalse(profiles.register("Alex", turn, generation)["ok"])
+        self.assertTrue(profiles.register("Alex", "My name is Alex", turn, generation)["ok"])
+        profiles.observe([("speaker_1", "Hi")])
+        self.assertFalse(profiles.register("Alex", "My name is Alex", turn, generation)["ok"])
         profiles.clear()
-        profiles.observe(["speaker_0"])
-        self.assertFalse(profiles.register("Alex", profiles.turn, generation)["ok"])
+        profiles.observe([("speaker_0", "Hi")])
+        self.assertFalse(
+            profiles.register("Alex", "My name is Alex", profiles.turn, generation)["ok"]
+        )
         old = SpeakerSpan(0, 16000, generation, (Activity(0, 16000, "speaker_0"),))
         _, speaker = attribute_transcript(
             {

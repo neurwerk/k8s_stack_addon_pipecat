@@ -45,9 +45,9 @@ class SpeakerSpan:
     generation: int
     activities: tuple[Activity, ...]
 
-    def speaker(self, start: int, end: int) -> str | None:
-        # Do not collapse overlap to a dominant speaker. Require enough attributed
-        # audio to avoid naming a word based on a tiny sliver at its boundary.
+    def speaker(self, start: int, end: int, *, enrollment: bool = False) -> str | None:
+        # Do not collapse overlap to a dominant speaker. Timestamps can extend
+        # into silence; still reject a tiny sliver at a word boundary.
         if not self.start <= start < end <= self.end:
             return None
         matched = [a for a in self.activities if a.start < end and a.end > start]
@@ -60,7 +60,8 @@ class SpeakerSpan:
             left, right = max(start, item.start), min(end, item.end)
             covered += max(0, right - max(cursor, left))
             cursor = max(cursor, right)
-        return next(iter(ids)) if covered >= (end - start) * 0.5 else None
+        required = (end - start) * 0.5 if enrollment else min((end - start) * 0.5, RATE // 10)
+        return next(iter(ids)) if covered >= required else None
 
 
 @dataclass
