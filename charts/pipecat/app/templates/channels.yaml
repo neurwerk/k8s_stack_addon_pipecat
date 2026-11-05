@@ -16,6 +16,7 @@
 {{- $names = append $names (printf "pipecat-%s" $bot.id) }}
 {{- end }}
 {{- $config := dict "intervalSeconds" $p.channels.intervalSeconds "bots" $configs }}
+{{- $kubeconfig := dict "apiVersion" "v1" "kind" "Config" "current-context" "controller" "clusters" (list (dict "name" "cluster" "cluster" (dict "server" "https://kubernetes.default.svc" "certificate-authority" "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"))) "users" (list (dict "name" "controller" "user" (dict "tokenFile" "/var/run/secrets/kubernetes.io/serviceaccount/token"))) "contexts" (list (dict "name" "controller" "context" (dict "cluster" "cluster" "user" "controller"))) }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -24,6 +25,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   config.json: {{ $config | toJson | quote }}
+  kubeconfig.json: {{ $kubeconfig | toJson | quote }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -67,6 +69,7 @@ spec:
       labels: {app.kubernetes.io/name: pipecat-channel-controller}
       annotations:
         checksum/config: {{ $config | toJson | sha256sum }}
+        checksum/kubeconfig: {{ $kubeconfig | toJson | sha256sum }}
     spec:
       serviceAccountName: pipecat-channel-controller
       automountServiceAccountToken: true
@@ -87,6 +90,7 @@ spec:
             capabilities: {drop: [ALL]}
           env:
             - {name: CHANNEL_CONFIG, value: /config/config.json}
+            - {name: KUBECONFIG, value: /config/kubeconfig.json}
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
             - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
