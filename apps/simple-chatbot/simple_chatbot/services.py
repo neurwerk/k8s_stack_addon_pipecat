@@ -49,7 +49,7 @@ def speech_headers(speech: Speech) -> dict[str, str]:
 class _SpeakerToolCall:
     """One bounded streamed function call; no arguments are interpreted while streaming."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.id = ""
         self.name = ""
         self.arguments = ""
@@ -278,7 +278,7 @@ class GatewayLLM(FrameProcessor):
         options: ConversationOptions | None = None,
         profiles: SpeakerProfiles | None = None,
         forget_speakers: Callable[[], Awaitable[None]] | None = None,
-    ):
+    ) -> None:
         super().__init__()
         self.settings = settings
         self.http = http
@@ -454,7 +454,7 @@ class GatewayLLM(FrameProcessor):
                 )
                 return
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if not isinstance(frame, LLMContextFrame):
             await self.push_frame(frame, direction)
@@ -589,7 +589,7 @@ class HTTPSTT(SegmentedSTTService):
         http: httpx.AsyncClient,
         timings: TurnTimings | None = None,
         diarization: DiarizationSession | None = None,
-    ):
+    ) -> None:
         super().__init__(sample_rate=16000)
         self.speech = settings
         self.http = http
@@ -621,7 +621,9 @@ class HTTPSTT(SegmentedSTTService):
         self._segment_task = self.create_task(self._segment_task_handler())
         self._input_paused = False
 
-    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
+    async def process_audio_frame(
+        self, frame: InputAudioRawFrame, direction: FrameDirection
+    ) -> None:
         if self._input_paused:
             return
         # Pinned Pipecat's segmented adapter has an unbounded queue and utterance buffer.
@@ -776,7 +778,9 @@ async def speech_text(text: str, text_type: str) -> str:
 
 
 class HTTPTTS(TTSService):
-    def __init__(self, settings: Speech, http: httpx.AsyncClient, activity: Activity | None = None):
+    def __init__(
+        self, settings: Speech, http: httpx.AsyncClient, activity: Activity | None = None
+    ) -> None:
         super().__init__(
             sample_rate=24000,
             push_start_frame=True,
@@ -814,7 +818,7 @@ class HTTPTTS(TTSService):
             return
         await super()._push_spoken_text(src_frame, text, context_id, append_to_context)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, LLMFullResponseStartFrame):
             self.timing = frame.metadata.get("turn_timing")
         elif isinstance(frame, InterruptionFrame):

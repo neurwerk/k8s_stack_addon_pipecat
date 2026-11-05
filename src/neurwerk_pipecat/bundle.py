@@ -205,22 +205,24 @@ def load_bundle() -> None:
             s3={"addressing_style": "path"},
         ),
     )
-    result = client.get_object(Bucket=bucket, Key=key)
     try:
-        if result["ContentLength"] > MAX_ARCHIVE:
-            raise ValueError("Archive too large")
-        with TemporaryDirectory() as temporary:
-            path = Path(temporary) / "bundle.tar.gz"
-            size = 0
-            with path.open("xb") as output:
-                for chunk in result["Body"].iter_chunks(65536):
-                    size += len(chunk)
-                    if size > MAX_ARCHIVE:
-                        raise ValueError("Archive too large")
-                    output.write(chunk)
-            extract(path, target, digest, os.environ.get("BUNDLE_APP_ID"))
+        result = client.get_object(Bucket=bucket, Key=key)
+        try:
+            if result["ContentLength"] > MAX_ARCHIVE:
+                raise ValueError("Archive too large")
+            with TemporaryDirectory() as temporary:
+                path = Path(temporary) / "bundle.tar.gz"
+                size = 0
+                with path.open("xb") as output:
+                    for chunk in result["Body"].iter_chunks(65536):
+                        size += len(chunk)
+                        if size > MAX_ARCHIVE:
+                            raise ValueError("Archive too large")
+                        output.write(chunk)
+                extract(path, target, digest, os.environ.get("BUNDLE_APP_ID"))
+        finally:
+            result["Body"].close()
     finally:
-        result["Body"].close()
         client.close()
 
 

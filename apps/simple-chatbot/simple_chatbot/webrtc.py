@@ -78,7 +78,7 @@ class BrowserMessages:
 
 
 class BrowserWebRTCConnection(SmallWebRTCConnection):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.browser_messages = BrowserMessages()
         self.inbound_tasks: set[asyncio.Future] = set()
         super().__init__(**kwargs)
@@ -113,7 +113,7 @@ class BrowserWebRTCConnection(SmallWebRTCConnection):
                         self.inbound_tasks.add(task)
                         task.add_done_callback(self.inbound_tasks.discard)
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         tasks = list(self.inbound_tasks)
         for task in tasks:
             task.cancel()

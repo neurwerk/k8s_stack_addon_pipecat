@@ -908,6 +908,7 @@ source = { editable = "." }
 dependencies = [
     { name = "boto3" },
     { name = "k8s-stack-tooling" },
+    { name = "pyyaml" },
     { name = "ruamel-yaml" },
 ]
 
@@ -923,6 +924,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl" },
+    { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruamel-yaml", specifier = ">=0.18,<0.19" },
 ]
 

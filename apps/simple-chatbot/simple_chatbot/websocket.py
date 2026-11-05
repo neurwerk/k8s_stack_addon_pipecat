@@ -7,7 +7,7 @@ from pipecat.serializers.protobuf import ProtobufFrameSerializer
 
 
 class BrowserSerializer(ProtobufFrameSerializer):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.ready = False
         self.budget = 64000.0
