@@ -20,8 +20,6 @@ jobs:
           path: build/base
       - uses: jdx/mise-action@v2
       - run: uv sync --frozen
-      - run: npm ci
-        working-directory: apps/simple-chatbot/frontend
       - run: make check BASE="$GITHUB_WORKSPACE/build/base"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

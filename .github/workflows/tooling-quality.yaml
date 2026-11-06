@@ -33,6 +33,8 @@ jobs:
           ref: ${{ inputs.base_ref || env.BASE_REF }}
           path: build/base
       - uses: jdx/mise-action@v2
+        with:
+          install_args: helm kustomize
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.7"
