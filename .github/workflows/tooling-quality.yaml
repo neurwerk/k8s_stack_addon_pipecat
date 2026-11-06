@@ -44,7 +44,7 @@ jobs:
         run: uv python install 3.12
       - name: Require published integration dependencies and reviewed lock
         run: |
-          test -f uv.lock || { echo 'Release prerequisite missing: publish Tooling 0.14.0/setup 0.7.0 sources, then generate and review tooling/uv.lock'; exit 1; }
+          test -f uv.lock || { echo 'Release prerequisite missing: publish the declared shared Tooling/setup artifacts, then generate and review tooling/uv.lock'; exit 1; }
           uv lock --check
       - name: Install exact shared Tooling and setup development dependencies
         run: uv sync --locked --dev

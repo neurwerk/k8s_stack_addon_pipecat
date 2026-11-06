@@ -15,7 +15,7 @@ pipecat:
   bots: []
   machineIdentity:
     # Shared generic service-client helper; not the separate Pipecat tooling artifact.
-    image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
+    image: ghcr.io/neurwerk/k8s-stack-tooling:0.18.3@sha256:fa30429bb143f0176867741dcf55eae422d69157b5f033e9d007745dd3639d79
     # Resource budget for each machine identity configuration Job.
     resources:
       requests: {cpu: 50m, memory: 64Mi}

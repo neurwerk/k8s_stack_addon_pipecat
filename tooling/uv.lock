@@ -654,8 +654,8 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-tooling"
-version = "0.16.0"
-source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl" }
+version = "0.18.3"
+source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.18.3/k8s_stack_tooling-0.18.3-py3-none-any.whl" }
 dependencies = [
     { name = "cryptography" },
     { name = "defusedxml" },
@@ -667,9 +667,10 @@ dependencies = [
     { name = "pyopenssl" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "urllib3" },
 ]
 wheels = [
-    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl", hash = "sha256:6b41da661cf29fc0cc5a5d0ae4edf9927f697f1e7093f2f9f280339fe475bdfd" },
+    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.18.3/k8s_stack_tooling-0.18.3-py3-none-any.whl", hash = "sha256:d96dc9ffdacdccbdf5762d3147cf922fa1a04f9f2775b6a7e965d34b413f9c1f" },
 ]
 
 [package.metadata]
@@ -684,6 +685,7 @@ requires-dist = [
     { name = "pyopenssl", specifier = ">=25.3" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "requests", specifier = ">=2.31" },
+    { name = "urllib3", specifier = ">=1.24.2,<3" },
 ]
 
 [[package]]
@@ -868,25 +870,27 @@ wheels = [
 
 [[package]]
 name = "openbao-stack-setup"
-version = "0.8.5"
-source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.5/openbao_stack_setup-0.8.5-py3-none-any.whl" }
+version = "0.8.6"
+source = { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.6/openbao_stack_setup-0.8.6-py3-none-any.whl" }
 dependencies = [
     { name = "cryptography" },
     { name = "k8s-stack-tooling" },
     { name = "kubernetes" },
+    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "questionary" },
     { name = "requests" },
 ]
 wheels = [
-    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.5/openbao_stack_setup-0.8.5-py3-none-any.whl", hash = "sha256:4113300c185b19c71070f244efafc4f7fa4f7312bde2d262adc9dbdbbb4ba47c" },
+    { url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.6/openbao_stack_setup-0.8.6-py3-none-any.whl", hash = "sha256:fbc2e7155c4bd9b95699c7362990abfd71a023f29404afbb0c673855b64fb717" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl" },
+    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.18.3/k8s_stack_tooling-0.18.3-py3-none-any.whl" },
     { name = "kubernetes", specifier = ">=36.0.3,<37" },
+    { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "questionary", specifier = ">=2.1" },
     { name = "requests", specifier = ">=2.31" },
@@ -923,14 +927,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
-    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl" },
+    { name = "k8s-stack-tooling", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.18.3/k8s_stack_tooling-0.18.3-py3-none-any.whl" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruamel-yaml", specifier = ">=0.18,<0.19" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "openbao-stack-setup", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.5/openbao_stack_setup-0.8.5-py3-none-any.whl" },
+    { name = "openbao-stack-setup", url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.6/openbao_stack_setup-0.8.6-py3-none-any.whl" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.15.17" },
     { name = "ty", specifier = ">=0.0.49" },
