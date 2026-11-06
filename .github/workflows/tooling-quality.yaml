@@ -14,8 +14,8 @@ on:
 permissions:
   contents: read
 env:
-  # Reviewed merged Base source for coordinated authentication cutover validation.
-  BASE_REF: e1b9c226c293fb99b2bc0da108d397a157a55d7f
+  # Reviewed Base release-preparation source.
+  BASE_REF: 3f517f697e3234dc589c7748b8f8b0b4524b9e44
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -44,7 +44,7 @@ jobs:
         run: uv python install 3.12
       - name: Require published integration dependencies and reviewed lock
         run: |
-          test -f uv.lock || { echo 'Release prerequisite missing: publish Tooling 0.14.0/setup 0.7.0 sources, then generate and review tooling/uv.lock'; exit 1; }
+          test -f uv.lock || { echo 'Release prerequisite missing: publish the declared shared Tooling/setup artifacts, then generate and review tooling/uv.lock'; exit 1; }
           uv lock --check
       - name: Install exact shared Tooling and setup development dependencies
         run: uv sync --locked --dev

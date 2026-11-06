@@ -3,15 +3,15 @@ kind: AddonRelease
 metadata:
   name: pipecat
 spec:
-  version: 0.2.7
-  # Runtime 0.2.2 and tooling 0.2.4 publication and anonymous linux/amd64 pulls verified.
-  status: ready
+  version: 0.2.8
+  # Candidate: publish and verify runtime 0.2.3/tooling 0.2.5 before replacing existing pins.
+  status: staged
   sourceName: pipecat-addon
   configurationKey: pipecat
   prerequisites:
-    base: 0.3.33
-    tooling: 0.16.0
-    stackSetup: 0.8.5
+    base: 0.3.34
+    tooling: 0.18.3
+    stackSetup: 0.8.6
     baseCharts: [charts/keycloak/addon-access, charts/keycloak/addon-oidc]
     baseChartVersions:
       charts/keycloak/addon-access: 0.1.7
@@ -66,10 +66,10 @@ spec:
       image: coturn/coturn:4.7.0@sha256:a00afb5b4890de4df22bbe70379c6b316685dffee297d53cac1271dcb91fab93
     - id: identity-provisioner
       role: shared
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.18.3@sha256:fa30429bb143f0176867741dcf55eae422d69157b5f033e9d007745dd3639d79
     - id: access-provisioner
       role: shared
-      image: ghcr.io/neurwerk/k8s-stack-tooling:0.15.6@sha256:2cfe62109c8067e08a81f422733e6673ef3eb0ee11066f72e7316878a76013db
+      image: ghcr.io/neurwerk/k8s-stack-tooling:0.18.3@sha256:fa30429bb143f0176867741dcf55eae422d69157b5f033e9d007745dd3639d79
   consumers:
     - {artifact: tooling, kind: Command, argv: [pipecat-validate, /work/addon]}
     - {artifact: tooling, package: app, kind: HelmRelease, namespace: pipecat, name: pipecat, container: channel-controller, optional: true}

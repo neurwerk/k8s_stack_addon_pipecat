@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipecat-tooling"
-version = "0.2.4"
+version = "0.2.5"
 description = "Pipecat app bundle publishing, operations and product selection validation."
 readme = "README.md"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY.md"]
 requires-python = ">=3.12"
-dependencies = ["k8s-stack-tooling==0.16.0", "boto3>=1.42,<2", "ruamel.yaml>=0.18,<0.19", "PyYAML>=6.0,<7"]
+dependencies = ["k8s-stack-tooling==0.18.3", "boto3>=1.42,<2", "ruamel.yaml>=0.18,<0.19", "PyYAML>=6.0,<7"]
 
 [project.scripts]
 pipecat-validate = "pipecat_tooling.cli:main"
@@ -19,9 +19,9 @@ pipecat-apps = "pipecat_tooling.apps:main"
 pipecat-channel-controller = "pipecat_tooling.channel_controller:main"
 
 [tool.uv.sources]
-k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.16.0/k8s_stack_tooling-0.16.0-py3-none-any.whl"}
+k8s-stack-tooling = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/v0.18.3/k8s_stack_tooling-0.18.3-py3-none-any.whl"}
 # Setup is a separate release; both artifacts are hash-pinned in uv.lock.
-openbao-stack-setup = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.5/openbao_stack_setup-0.8.5-py3-none-any.whl"}
+openbao-stack-setup = {url = "https://github.com/neurwerk/k8s_stack_tooling/releases/download/stack-setup-v0.8.6/openbao_stack_setup-0.8.6-py3-none-any.whl"}
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pipecat_tooling"]
@@ -48,7 +48,7 @@ include = ["src", "tests"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.17", "ty>=0.0.49", "pytest>=8", "openbao-stack-setup==0.8.5"]
+dev = ["ruff>=0.15.17", "ty>=0.0.49", "pytest>=8", "openbao-stack-setup==0.8.6"]
 
 [project.urls]
 Homepage = "https://github.com/neurwerk/k8s_stack_addon_pipecat"

@@ -17,4 +17,6 @@ pipecat-validate /work/addon --values /work/client/config/client.yaml --values /
 
 The tooling image also runs `pipecat-channel-controller` for opted-in [release channels](../scripts.md#automatic-release-channels), with read-only S3 access and named Deployment get/patch permissions. Publishing and rollback remain in `pipecat-apps`; shared Tooling has no Pipecat-specific release behavior.
 
+Coordinate SDK upgrades with the separately published setup wheel used by integration checks. Setup's direct SDK dependency must agree with the product's exact SDK source before regenerating the lock; do not override it or substitute an unpublished setup artifact. A newer SDK alone does not make that dependency pair available.
+
 See [architecture](../architecture/README.md) and [release operations](../operations/README.md).
