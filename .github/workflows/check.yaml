@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 env:
-  # Reviewed Base 0.3.33 release-preparation source.
-  BASE_REF: e1b9c226c293fb99b2bc0da108d397a157a55d7f
+  # Reviewed Base release-preparation source.
+  BASE_REF: 3f517f697e3234dc589c7748b8f8b0b4524b9e44
 jobs:
   check:
     runs-on: ubuntu-24.04
