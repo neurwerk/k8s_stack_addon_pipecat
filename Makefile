@@ -6,8 +6,11 @@ TOOLING := uv run --locked --project tooling
 TOOLING_IMAGE := ghcr.io/neurwerk/k8s-stack-addon-pipecat-tooling
 CHARTS := $(sort $(shell find charts -name Chart.yaml -exec dirname {} \;))
 
-.PHONY: check addon-check lint schema compose static test build image-build tooling-check tooling-integration tooling-build
-check: tooling-check addon-check lint schema compose static test build
+.PHONY: check addon-check lint schema compose static test build build-prepared image-build tooling-check tooling-integration tooling-build
+check:
+	$(MAKE) -C apps/simple-chatbot frontend-dependencies
+	$(MAKE) tooling-check addon-check lint schema compose static test
+	$(MAKE) build-prepared
 
 addon-check:
 	@test -n "$(BASE)" || { echo 'Set BASE to the explicit Base candidate checkout'; exit 1; }
@@ -33,8 +36,12 @@ static:
 	cd apps/simple-chatbot/frontend && npm run check
 
 build:
+	$(MAKE) -C apps/simple-chatbot frontend-dependencies
+	$(MAKE) build-prepared
+
+build-prepared:
 	uv build --no-sources
-	$(MAKE) -C apps/simple-chatbot build dependencies BASELINE_PROJECT="$(CURDIR)"
+	$(MAKE) -C apps/simple-chatbot build-prepared dependencies BASELINE_PROJECT="$(CURDIR)"
 	$(TOOLING) pipecat-apps validate --apps-dir apps --app simple-chatbot
 
 test:
